@@ -1,0 +1,67 @@
+{
+    "version": 3,
+    "configurePresets": [
+        {
+            "name": "release",
+            "displayName": "Release",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "USE_JEMALLOC": "OFF",
+                "ENABLE_ASAN": "OFF"
+            }
+        },
+        {
+            "name": "release-jemalloc",
+            "displayName": "Release with jemalloc",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/release-jemalloc",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "USE_JEMALLOC": "ON",
+                "ENABLE_ASAN": "OFF"
+            }
+        },
+        {
+            "name": "debug",
+            "displayName": "Debug",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "USE_JEMALLOC": "OFF",
+                "ENABLE_ASAN": "OFF"
+            }
+        },
+        {
+            "name": "asan",
+            "displayName": "AddressSanitizer",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/asan",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "USE_JEMALLOC": "OFF",
+                "ENABLE_ASAN": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "release",
+            "configurePreset": "release"
+        },
+        {
+            "name": "release-jemalloc",
+            "configurePreset": "release-jemalloc"
+        },
+        {
+            "name": "debug",
+            "configurePreset": "debug"
+        },
+        {
+            "name": "asan",
+            "configurePreset": "asan"
+        }
+    ]
+}

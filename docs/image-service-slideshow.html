@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Image Processing Service — Solution Proposal</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #111;
+    color: #f0f0f0;
+    height: 100vh;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  .deck { width: 100%; height: 100vh; position: relative; }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    padding: 56px 72px;
+    background: #1a1a1a;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  .slide.active { display: flex; opacity: 1; }
+
+  /* Slide variants */
+  .slide.cover {
+    background: linear-gradient(135deg, #1a1a1a 0%, #2a1800 100%);
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  .slide.dark  { background: #161616; }
+  .slide.orange { background: linear-gradient(135deg, #1a1a1a 0%, #2d1400 100%); }
+
+  /* Typography */
+  .slide-label {
+    font-size: 11px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: #FF8000;
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+  h1 { font-size: 52px; font-weight: 700; line-height: 1.1; color: #fff; }
+  h2 { font-size: 32px; font-weight: 700; color: #fff; margin-bottom: 28px; line-height: 1.2; }
+  h3 { font-size: 18px; font-weight: 600; color: #FF8000; margin-bottom: 6px; }
+  .subtitle { font-size: 20px; color: #aaa; margin-top: 16px; }
+  p { font-size: 16px; line-height: 1.7; color: #ccc; }
+  .highlight { color: #FF8000; font-weight: 700; }
+  .muted { color: #888; font-size: 14px; }
+
+  /* Layout helpers */
+  .cols { display: grid; gap: 32px; flex: 1; }
+  .cols-2 { grid-template-columns: 1fr 1fr; }
+  .cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .col { display: flex; flex-direction: column; gap: 12px; }
+  .spacer { flex: 1; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  thead tr { border-bottom: 2px solid #FF8000; }
+  th { text-align: left; padding: 10px 14px; color: #FF8000; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  td { padding: 10px 14px; color: #ddd; border-bottom: 1px solid #2a2a2a; line-height: 1.5; }
+  tr:last-child td { border-bottom: none; }
+  td strong { color: #FF8000; }
+  td.win { color: #4CAF50; font-weight: 700; }
+  td.bad { color: #f44336; }
+  td.na  { color: #555; }
+
+  /* Code / flow blocks */
+  pre, code {
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .code-block {
+    background: #0d0d0d;
+    border: 1px solid #2a2a2a;
+    border-left: 3px solid #FF8000;
+    border-radius: 6px;
+    padding: 20px 24px;
+    color: #e0e0e0;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .code-block .comment { color: #555; }
+  .code-block .accent  { color: #FF8000; }
+  .code-block .green   { color: #4CAF50; }
+  .code-block .red     { color: #f44336; }
+  .code-block .blue    { color: #64B5F6; }
+
+  /* Stat cards */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+  .stat-card {
+    background: #0d0d0d;
+    border: 1px solid #2a2a2a;
+    border-top: 3px solid #FF8000;
+    border-radius: 8px;
+    padding: 24px 20px;
+    text-align: center;
+  }
+  .stat-card .number { font-size: 36px; font-weight: 700; color: #FF8000; line-height: 1; }
+  .stat-card .label  { font-size: 12px; color: #888; margin-top: 8px; line-height: 1.4; }
+
+  /* Pill badges */
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .badge-orange { background: #FF800022; color: #FF8000; border: 1px solid #FF800044; }
+  .badge-green  { background: #4CAF5022; color: #4CAF50; border: 1px solid #4CAF5044; }
+  .badge-red    { background: #f4433622; color: #f44336; border: 1px solid #f4433644; }
+  .badge-blue   { background: #64B5F622; color: #64B5F6; border: 1px solid #64B5F644; }
+
+  /* Feature list */
+  .feature-list { list-style: none; display: flex; flex-direction: column; gap: 14px; }
+  .feature-list li { display: flex; align-items: flex-start; gap: 12px; font-size: 15px; color: #ccc; line-height: 1.5; }
+  .feature-list li::before { content: '▸'; color: #FF8000; font-size: 14px; margin-top: 2px; flex-shrink: 0; }
+  .feature-list li strong { color: #fff; }
+
+  /* Phase timeline */
+  .phases { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .phase {
+    background: #0d0d0d;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 20px 16px;
+  }
+  .phase .phase-num { font-size: 11px; font-weight: 700; color: #FF8000; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px; }
+  .phase .phase-title { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 10px; }
+  .phase .phase-items { font-size: 13px; color: #888; line-height: 1.8; }
+
+  /* Navigation */
+  .nav {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    background: #0d0d0d;
+    border: 1px solid #2a2a2a;
+    border-radius: 99px;
+    padding: 10px 24px;
+    z-index: 100;
+  }
+  .nav button {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: color 0.2s;
+  }
+  .nav button:hover { color: #FF8000; }
+  .nav button:disabled { color: #333; cursor: default; }
+  .nav .counter { font-size: 13px; color: #555; min-width: 60px; text-align: center; }
+
+  .progress {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: #222;
+    z-index: 100;
+  }
+  .progress-bar {
+    height: 100%;
+    background: #FF8000;
+    transition: width 0.3s ease;
+  }
+
+  .slide-num {
+    position: fixed;
+    top: 20px; right: 24px;
+    font-size: 11px;
+    color: #444;
+    letter-spacing: 1px;
+    z-index: 100;
+  }
+
+  /* Divider */
+  .divider { width: 48px; height: 3px; background: #FF8000; margin-bottom: 24px; border-radius: 2px; }
+  .divider-center { margin: 12px auto 24px; }
+
+  /* Arch diagram */
+  .arch {
+    display: grid;
+    grid-template-columns: 1fr 2fr 1fr;
+    gap: 0;
+    align-items: center;
+    flex: 1;
+  }
+  .arch-box {
+    background: #0d0d0d;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+    font-size: 13px;
+  }
+  .arch-arrow { text-align: center; color: #FF8000; font-size: 22px; }
+</style>
+</head>
+<body>
+
+<div class="progress"><div class="progress-bar" id="progressBar"></div></div>
+<div class="slide-num" id="slideNum"></div>
+
+<div class="deck" id="deck">
+
+  <!-- SLIDE 1: Cover -->
+  <div class="slide cover active">
+    <div class="slide-label">Engineering Proposal · 2026</div>
+    <h1>Image Processing<br>Service</h1>
+    <p class="subtitle">Upload · Resize · Crop · Convert<br>Built on C++23 · libvips · AWS S3 · CloudFront</p>
+  </div>
+
+  <!-- SLIDE 2: The Problem -->
+  <div class="slide">
+    <div class="slide-label">The Problem</div>
+    <h2>Images Are Served Inefficiently Today</h2>
+    <table>
+      <thead><tr><th>Reality</th><th>Impact</th></tr></thead>
+      <tbody>
+        <tr><td>iPhone photo = <strong>8–12 MB</strong> at 4000×3000 px</td><td>Chat thumbnail needs 160×160 px</td></tr>
+        <tr><td>Original file served to every client</td><td><strong>99% of bandwidth wasted</strong> per image</td></tr>
+        <tr><td>GPS + device info in EXIF metadata</td><td>Leaked to <strong>every recipient</strong></td></tr>
+        <tr><td>No format negotiation</td><td>iOS sends HEIC · browsers receive nothing</td></tr>
+        <tr><td>Feed loads 20–30 images at once</td><td><strong>3–5 seconds on 4G</strong> = users leave</td></tr>
+      </tbody>
+    </table>
+    <div class="spacer"></div>
+    <p style="color:#888; font-size:14px; border-left: 3px solid #FF8000; padding-left:16px;">
+      Without a dedicated image service, all of this falls onto the client — the worst possible place for compute, bandwidth, and battery.
+    </p>
+  </div>
+
+  <!-- SLIDE 3: What Good Looks Like -->
+  <div class="slide">
+    <div class="slide-label">The Solution</div>
+    <h2>What Good Looks Like</h2>
+    <div class="cols cols-2" style="gap:24px; flex:1;">
+      <div>
+        <h3>Upload Path</h3>
+        <div class="code-block"><span class="accent">User uploads photo</span>
+        ↓
+  Image Service
+  · Validate format (magic bytes)
+  · <span class="green">Strip EXIF / GPS data</span>
+  · Store clean original
+        ↓
+      <span class="blue">S3</span></div>
+      </div>
+      <div>
+        <h3>Serve Path</h3>
+        <div class="code-block"><span class="accent">Client requests image</span>
+        ↓
+  CloudFront CDN
+  · Cache HIT  → <span class="green">&lt; 20ms ✓</span>
+  · Cache MISS ↓
+  Image Service
+  · Resize to 512×512
+  · Convert to WebP
+  · Cache result
+        ↓
+  <span class="green">40 KB instead of 8 MB</span></div>
+      </div>
+    </div>
+    <div class="stats" style="margin-top:24px;">
+      <div class="stat-card"><div class="number">98%</div><div class="label">Bandwidth reduction per image</div></div>
+      <div class="stat-card"><div class="number">&lt;20ms</div><div class="label">Cache hit response time</div></div>
+      <div class="stat-card"><div class="number">0</div><div class="label">EXIF records in stored files</div></div>
+      <div class="stat-card"><div class="number">&lt;300ms</div><div class="label">Feed load time (4G)</div></div>
+    </div>
+  </div>
+
+  <!-- SLIDE 4: Core Features -->
+  <div class="slide">
+    <div class="slide-label">MVP Scope</div>
+    <h2>Core Features</h2>
+    <div class="cols cols-2" style="flex:1; gap:40px;">
+      <div>
+        <h3>Upload</h3>
+        <ul class="feature-list">
+          <li><strong>Direct to S3</strong> — client gets a presigned URL, uploads directly. No server bottleneck.</li>
+          <li><strong>Server-side</strong> — POST binary through our service. EXIF stripped before storage.</li>
+          <li><strong>Magic byte validation</strong> — reject forged content types before decode.</li>
+          <li><strong>Input size cap</strong> — 20 MB / 50 MP limit prevents image bomb attacks.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Transform</h3>
+        <ul class="feature-list">
+          <li><strong>Resize</strong> — fit, cover, force. Passthrough when source is already small.</li>
+          <li><strong>Crop</strong> — gravity-based (centre, top, smart). Smart crop keeps faces in frame.</li>
+          <li><strong>Convert</strong> — JPEG ↔ WebP ↔ PNG. Explicit <code style="color:#FF8000">?format=webp</code> param.</li>
+          <li><strong>Quality control</strong> — per-format quality, metadata strip on output.</li>
+        </ul>
+      </div>
+    </div>
+    <div style="margin-top:24px; padding: 14px 20px; background:#0d0d0d; border:1px solid #2a2a2a; border-left: 3px solid #555; border-radius:6px;">
+      <span style="color:#555; font-size:13px;">Optional (add incrementally): </span>
+      <span style="color:#666; font-size:13px;">Watermark · Blur · Pipeline · AVIF · Filters · Shape mask · Rotation</span>
+    </div>
+  </div>
+
+  <!-- SLIDE 5: Design Principle -->
+  <div class="slide orange">
+    <div class="slide-label">Design Principle</div>
+    <h2>Synchronous On-Demand Processing</h2>
+    <div class="cols cols-2" style="flex:1; gap:40px; align-items:start;">
+      <div>
+        <div class="badge badge-green" style="margin-bottom:16px;">✓ Our approach</div>
+        <div class="code-block"><span class="green">GET /users/123/photo.jpg?w=512</span>
+
+→ image bytes in &lt; 300ms ✓
+
+One request. One response.
+No state. No polling.</div>
+      </div>
+      <div>
+        <div class="badge badge-red" style="margin-bottom:16px;">✗ Async approach</div>
+        <div class="code-block"><span class="red">POST /jobs/resize → { job_id: "abc" }
+GET  /jobs/abc    → { status: "pending" }
+GET  /jobs/abc    → { status: "pending" }
+GET  /jobs/abc    → { status: "done" }
+GET  result_url   → image bytes</span></div>
+      </div>
+    </div>
+    <div style="margin-top:28px;">
+      <ul class="feature-list">
+        <li><code>&lt;img src="..."&gt;</code> tags <strong>cannot poll</strong> — the browser expects bytes in one response</li>
+        <li>A feed scroll gives <strong>~300ms</strong> before blank tiles are noticeable</li>
+        <li>On-demand + CDN = each unique transform computed <strong>once, then free forever</strong></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- SLIDE 6: Market Analysis -->
+  <div class="slide">
+    <div class="slide-label">Market Analysis</div>
+    <h2>Why Not an Existing Solution?</h2>
+    <table>
+      <thead><tr><th>Capability</th><th>imgproxy</th><th>imaginary</th><th>weserv/images</th></tr></thead>
+      <tbody>
+        <tr><td>Language / stack</td><td>Go</td><td>Go</td><td>C++17 nginx module</td></tr>
+        <tr><td>JPEG resize throughput</td><td>~266 RPS</td><td>moderate</td><td class="bad">~28 RPS (unstable)</td></tr>
+        <tr><td>CPU per request</td><td class="bad">666%</td><td class="bad">high</td><td class="bad">blocks event loop</td></tr>
+        <tr><td>Memory (RSS)</td><td>~350 MB</td><td>~400 MB</td><td class="bad">1400–2800 MB</td></tr>
+        <tr><td>p99 latency</td><td>good</td><td>moderate</td><td class="bad">≥ 5s on many ops</td></tr>
+        <tr><td>Upload + EXIF strip</td><td class="bad">✗ No</td><td class="bad">✗ No</td><td class="bad">✗ No</td></tr>
+        <tr><td>Active maintenance</td><td class="win">Yes</td><td class="bad">Minimal</td><td class="win">Yes</td></tr>
+      </tbody>
+    </table>
+    <div class="spacer"></div>
+    <p style="color:#FF8000; font-weight:700; font-size:15px; border-left: 3px solid #FF8000; padding-left:16px;">
+      The gap no solution fills: upload with EXIF stripping.<br>
+      <span style="color:#888; font-weight:400;">That requires building regardless — so we build the full service.</span>
+    </p>
+  </div>
+
+  <!-- SLIDE 7: Our Solution -->
+  <div class="slide orange">
+    <div class="slide-label">Our Solution</div>
+    <h2>imago</h2>
+    <div class="cols cols-2" style="flex:1; gap:40px; align-items:start;">
+      <div>
+        <table>
+          <thead><tr><th>Layer</th><th>Technology</th></tr></thead>
+          <tbody>
+            <tr><td>HTTP server</td><td><strong>Drogon</strong> (C++23, coroutines)</td></tr>
+            <tr><td>Image processing</td><td><strong>libvips</strong> — fastest OSS image library</td></tr>
+            <tr><td>Object storage</td><td><strong>AWS S3 SDK</strong> — async native</td></tr>
+            <tr><td>Memory allocator</td><td><strong>jemalloc</strong> — reduces fragmentation</td></tr>
+            <tr><td>Compute</td><td><strong>c7g Graviton3</strong> ARM — libvips NEON SIMD</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <h3>Key Architectural Advantage</h3>
+        <div class="code-block">Drogon IO threads
+  → never call libvips
+  → <span class="accent">co_await pool.submit(...)</span>
+  → suspends without blocking
+        ↓
+VipsWorkerPool threads
+  → all libvips runs here
+  → VIPS_CONCURRENCY=1 per worker
+  → parallelism at thread level</div>
+        <p style="font-size:13px; color:#666; margin-top:12px;">
+          imgproxy blocks an OS thread per request.<br>
+          weserv blocks the entire nginx event loop.<br>
+          <span style="color:#FF8000;">imago never blocks — IO and CPU are fully decoupled.</span>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 8: Architecture -->
+  <div class="slide">
+    <div class="slide-label">System Architecture</div>
+    <h2>Two Paths. One Binary. Two Services.</h2>
+    <div class="cols cols-2" style="flex:1; gap:32px;">
+      <div>
+        <h3>Upload Paths</h3>
+        <div class="code-block" style="font-size:12px;"><span class="comment">// Path A — Direct to S3 (fast)</span>
+Client → <span class="accent">POST /v1/upload/presign</span>
+       ← { presigned_url, s3_key }
+Client → <span class="blue">PUT image → S3 directly</span>
+Client → <span class="accent">POST /v1/upload/confirm</span>
+       → imago HEAD checks S3 ✓
+
+<span class="comment">// Path B — Server-side (EXIF stripped)</span>
+Client → <span class="accent">POST /v1/upload/binary</span>
+       → imago <span class="green">strips EXIF</span>
+       → <span class="blue">PUT clean image → S3</span></div>
+      </div>
+      <div>
+        <h3>Serve Path</h3>
+        <div class="code-block" style="font-size:12px;">Client → GET /users/123/photo.jpg?w=512
+       ↓
+  <span class="accent">CloudFront</span>
+  ├─ Cache HIT  → <span class="green">&lt; 20ms ✓</span>
+  └─ Cache MISS
+       │ + X-Origin-Token
+       ↓
+     <span class="blue">ALB</span>
+       ↓
+  <span class="accent">imago-processor</span>
+  · GetObject from S3
+  · shrink-on-load decode
+  · resize / crop / convert
+  · Cache-Control + ETag
+       ↓
+  <span class="green">CloudFront caches · client receives</span></div>
+      </div>
+    </div>
+    <div style="display:flex; gap:16px; margin-top:20px;">
+      <div style="flex:1; background:#0d0d0d; border:1px solid #2a2a2a; border-top:3px solid #FF8000; border-radius:6px; padding:14px 18px;">
+        <div style="font-size:11px; color:#FF8000; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">imago-uploader</div>
+        <div style="font-size:13px; color:#888;">Routes: <code>/v1/upload/*</code> · Scales on: CPU</div>
+      </div>
+      <div style="flex:1; background:#0d0d0d; border:1px solid #2a2a2a; border-top:3px solid #FF8000; border-radius:6px; padding:14px 18px;">
+        <div style="font-size:11px; color:#FF8000; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">imago-processor</div>
+        <div style="font-size:13px; color:#888;">Routes: <code>/*</code> · Scales on: CPU + RAM</div>
+      </div>
+      <div style="flex:1; background:#0d0d0d; border:1px solid #2a2a2a; border-top:3px solid #4CAF50; border-radius:6px; padding:14px 18px;">
+        <div style="font-size:11px; color:#4CAF50; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">Same Docker Image</div>
+        <div style="font-size:13px; color:#888;">ECS on EC2 · c7g Graviton3 ARM</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 9: Caching -->
+  <div class="slide">
+    <div class="slide-label">Caching Design</div>
+    <h2>Each Unique Transform Computed Once. Ever.</h2>
+    <div class="cols cols-2" style="flex:1; gap:40px; align-items:start;">
+      <div>
+        <h3>Cache Layers</h3>
+        <table>
+          <thead><tr><th>Layer</th><th>TTL</th><th>Mechanism</th></tr></thead>
+          <tbody>
+            <tr><td>CloudFront</td><td><strong>7 days</strong></td><td>Cache-Control header</td></tr>
+            <tr><td>ETag revalidation</td><td>Indefinite</td><td>304 Not Modified</td></tr>
+            <tr><td>Client browser</td><td>7 days</td><td>Inherits CloudFront</td></tr>
+          </tbody>
+        </table>
+        <div style="margin-top:20px;">
+          <h3>Cache Key</h3>
+          <div class="code-block" style="font-size:12px;">/users/123/<span class="accent">photo_v2.jpg</span>?w=512&h=512
+             &format=webp&quality=85
+
+Each unique transform = separate entry
+No <span class="red">Vary</span> header — format is explicit</div>
+        </div>
+      </div>
+      <div>
+        <h3>Cache Invalidation — Versioned Keys</h3>
+        <div class="code-block" style="font-size:12px;"><span class="comment">// User re-uploads photo</span>
+Old key: users/123/<span class="red">photo_v2.jpg</span>
+New key: users/123/<span class="green">photo_v3.jpg</span>
+
+App stores new key → serves new URL
+Old URLs expire naturally after 7 days
+
+<span class="green">✓ Zero CloudFront invalidation calls
+✓ Zero cost
+✓ Zero propagation delay</span></div>
+        <div style="margin-top:16px; padding:14px; background:#0d0d0d; border-radius:6px; font-size:13px; color:#888;">
+          CloudFront invalidation API costs $0.005/path with ~15s delay.<br>
+          Versioned keys eliminate both entirely.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 10: API Design -->
+  <div class="slide">
+    <div class="slide-label">API Design</div>
+    <h2>Simple, Predictable, CDN-Friendly</h2>
+    <div class="cols cols-2" style="flex:1; gap:40px; align-items:start;">
+      <div>
+        <h3>Serve URL</h3>
+        <div class="code-block" style="font-size:13px;">https://images.yourdomain.com
+  /<span class="accent">users/123/photo_v2.jpg</span>
+  ?<span class="blue">w</span>=512
+  &<span class="blue">h</span>=512
+  &<span class="blue">fit</span>=cover
+  &<span class="blue">format</span>=webp
+  &<span class="blue">quality</span>=85
+  &<span class="blue">crop</span>=smart</div>
+        <div style="margin-top:16px;">
+          <h3>Upload Endpoints</h3>
+          <div class="code-block" style="font-size:12px;"><span class="green">POST</span> /v1/upload/<span class="accent">presign</span>
+  → { presigned_url, s3_key }
+
+<span class="green">POST</span> /v1/upload/<span class="accent">confirm</span>
+  → { s3_key, ready: true }
+
+<span class="green">POST</span> /v1/upload/<span class="accent">binary</span>
+  → { s3_key, size_bytes }
+  <span class="comment">  ← EXIF stripped</span></div>
+        </div>
+      </div>
+      <div>
+        <h3>Query Parameters</h3>
+        <table>
+          <thead><tr><th>Param</th><th>Example</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><code>w</code></td><td><code>?w=512</code></td><td>Target width</td></tr>
+            <tr><td><code>h</code></td><td><code>?h=512</code></td><td>Target height</td></tr>
+            <tr><td><code>fit</code></td><td><code>?fit=cover</code></td><td>contain / cover / fill</td></tr>
+            <tr><td><code>format</code></td><td><code>?format=webp</code></td><td>jpeg / webp / png</td></tr>
+            <tr><td><code>quality</code></td><td><code>?quality=85</code></td><td>1–100</td></tr>
+            <tr><td><code>crop</code></td><td><code>?crop=smart</code></td><td>center / top / smart</td></tr>
+          </tbody>
+        </table>
+        <div style="margin-top:16px;">
+          <h3>Error Format</h3>
+          <div class="code-block" style="font-size:12px;">{
+  <span class="accent">"code"</span>:    "INVALID_PARAM",
+  <span class="accent">"message"</span>: "width must be 1–5000",
+  <span class="accent">"field"</span>:   "w"
+}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 11: Infrastructure -->
+  <div class="slide dark">
+    <div class="slide-label">Infrastructure</div>
+    <h2>AWS-Native · Graviton3 · Auto-Scaling</h2>
+    <div class="cols cols-2" style="flex:1; gap:40px; align-items:start;">
+      <div>
+        <div class="code-block" style="font-size:12px; line-height:2;">         <span class="accent">CloudFront</span>
+         images.yourdomain.com
+                  │
+         <span class="blue">Application Load Balancer</span>
+          ┌───────┴────────┐
+  /v1/upload/*           /*
+          │                │
+  <span class="accent">imago-uploader</span>   <span class="accent">imago-processor</span>
+  ECS · EC2 c7g    ECS · EC2 c7g
+  Scale: CPU       Scale: CPU+RAM
+          └───────┬────────┘
+                  │
+            <span class="green">S3 Bucket</span>
+          (versioned keys)</div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <div>
+          <h3>Why c7g Graviton3 (ARM)?</h3>
+          <ul class="feature-list">
+            <li>libvips uses ARM <strong>NEON SIMD</strong> for JPEG DCT, WebP, convolution</li>
+            <li><strong>20–30% better</strong> image throughput per dollar vs x86</li>
+            <li>Lower cost than c6i at equivalent performance</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Deployment</h3>
+          <ul class="feature-list">
+            <li>Ubuntu 24.04 arm64 · libvips from apt · jemalloc via LD_PRELOAD</li>
+            <li>Image stored in <strong>ECR</strong></li>
+            <li>Config via <strong>environment variables</strong> — no config files</li>
+            <li>CI/CD: build → test → ECR push → ECS rolling deploy</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 12: Monitoring -->
+  <div class="slide">
+    <div class="slide-label">Monitoring</div>
+    <h2>Full Observability Stack</h2>
+    <div class="cols cols-3" style="flex:1; gap:24px; align-items:start;">
+      <div style="background:#0d0d0d; border:1px solid #2a2a2a; border-top:3px solid #FF8000; border-radius:8px; padding:20px;">
+        <h3>Metrics</h3>
+        <p style="margin:12px 0 16px; font-size:13px; color:#888;">Prometheus endpoint on <code>/metrics</code><br>Amazon Managed Grafana dashboards</p>
+        <ul class="feature-list" style="font-size:13px;">
+          <li>RPS + error rate per endpoint</li>
+          <li>p50 / p95 / <strong>p99 latency</strong></li>
+          <li>Worker queue depth</li>
+          <li>Memory RSS over time</li>
+          <li>CloudFront cache hit rate</li>
+        </ul>
+      </div>
+      <div style="background:#0d0d0d; border:1px solid #2a2a2a; border-top:3px solid #64B5F6; border-radius:8px; padding:20px;">
+        <h3>Logs</h3>
+        <p style="margin:12px 0 16px; font-size:13px; color:#888;">CloudWatch Logs<br>Structured JSON per request</p>
+        <div class="code-block" style="font-size:11px;">{
+  "endpoint": "processor",
+  "s3_key": "users/123/photo.jpg",
+  "transform": { "w": 512 },
+  "duration_ms": 87,
+  "output_bytes": 18420,
+  "cache": "miss",
+  "status": 200
+}</div>
+      </div>
+      <div style="background:#0d0d0d; border:1px solid #2a2a2a; border-top:3px solid #4CAF50; border-radius:8px; padding:20px;">
+        <h3>Alarms</h3>
+        <p style="margin:12px 0 16px; font-size:13px; color:#888;">CloudWatch Alarms</p>
+        <table style="font-size:12px;">
+          <thead><tr><th>Metric</th><th>Threshold</th></tr></thead>
+          <tbody>
+            <tr><td>p99 latency</td><td>&gt; 300ms</td></tr>
+            <tr><td>Error rate</td><td>&gt; 1%</td></tr>
+            <tr><td>Queue depth</td><td>&gt; 80%</td></tr>
+            <tr><td>CPU%</td><td>&gt; 70%</td></tr>
+            <tr><td>RAM%</td><td>&gt; 75%</td></tr>
+            <tr><td>Cache hit rate</td><td>&lt; 85%</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 13: Benchmarks -->
+  <div class="slide">
+    <div class="slide-label">Benchmark Results · 2026-04-14</div>
+    <h2>imago vs imgproxy vs weserv</h2>
+    <p class="muted" style="margin-bottom:20px;">300 requests · 20 concurrent · sequential containers</p>
+    <table>
+      <thead><tr><th>Scenario</th><th>imago</th><th>imgproxy</th><th>weserv</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>JPEG resize RPS</td>
+          <td>229</td>
+          <td>266</td>
+          <td class="bad">28</td>
+        </tr>
+        <tr>
+          <td>JPEG resize CPU</td>
+          <td class="win">0.12%</td>
+          <td class="bad">666%</td>
+          <td class="bad">73.5%</td>
+        </tr>
+        <tr>
+          <td>JPEG resize RAM</td>
+          <td>357 MB</td>
+          <td>333 MB</td>
+          <td class="bad">1368 MB</td>
+        </tr>
+        <tr>
+          <td>WebP resize RPS</td>
+          <td class="win">267</td>
+          <td>233</td>
+          <td>127</td>
+        </tr>
+        <tr>
+          <td>No-enlarge passthrough</td>
+          <td class="win">792 RPS</td>
+          <td>507 RPS</td>
+          <td class="bad">53 RPS</td>
+        </tr>
+        <tr>
+          <td>Convert → WebP</td>
+          <td class="win">144 RPS</td>
+          <td>53 RPS</td>
+          <td class="bad">12 RPS</td>
+        </tr>
+        <tr>
+          <td>Worst p99 latency</td>
+          <td class="win">0.66s</td>
+          <td class="bad">~5s</td>
+          <td class="bad">~5.4s</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="display:flex; gap:16px; margin-top:20px;">
+      <div style="flex:1; padding:14px 18px; background:#0d0d0d; border-radius:6px; border-left:3px solid #4CAF50;">
+        <div style="font-size:13px; color:#4CAF50; font-weight:700;">imago vs imgproxy</div>
+        <div style="font-size:13px; color:#888; margin-top:4px;">Similar throughput at <strong style="color:#fff">5500× less CPU</strong></div>
+      </div>
+      <div style="flex:1; padding:14px 18px; background:#0d0d0d; border-radius:6px; border-left:3px solid #4CAF50;">
+        <div style="font-size:13px; color:#4CAF50; font-weight:700;">imago vs weserv</div>
+        <div style="font-size:13px; color:#888; margin-top:4px;"><strong style="color:#fff">4–8× less memory</strong> · no 5s tail latency</div>
+      </div>
+      <div style="flex:1; padding:14px 18px; background:#0d0d0d; border-radius:6px; border-left:3px solid #FF8000;">
+        <div style="font-size:13px; color:#FF8000; font-weight:700;">Upload + EXIF strip</div>
+        <div style="font-size:13px; color:#888; margin-top:4px;"><strong style="color:#fff">No competitor</strong> supports this</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 14: Impact -->
+  <div class="slide">
+    <div class="slide-label">Expected Impact</div>
+    <h2>Before vs. After</h2>
+    <table style="margin-bottom:28px;">
+      <thead><tr><th>Metric</th><th>Before</th><th>After</th></tr></thead>
+      <tbody>
+        <tr><td>Average image payload (chat thumb)</td><td class="bad">~4 MB</td><td class="win">~40 KB</td></tr>
+        <tr><td>Bandwidth per 1M image serves</td><td class="bad">~4 TB</td><td class="win">~40 GB</td></tr>
+        <tr><td>EXIF / GPS in stored files</td><td class="bad">Always present</td><td class="win">Stripped at upload</td></tr>
+        <tr><td>Feed p99 load time (4G)</td><td class="bad">3–5 seconds</td><td class="win">&lt; 300ms</td></tr>
+        <tr><td>CDN cache hit rate</td><td class="bad">0%</td><td class="win">~90%+ at steady state</td></tr>
+      </tbody>
+    </table>
+    <div class="stats">
+      <div class="stat-card"><div class="number">98%</div><div class="label">Bandwidth reduction per image</div></div>
+      <div class="stat-card"><div class="number">360 TB</div><div class="label">CDN egress saved per month<br>at 10M req/day</div></div>
+      <div class="stat-card"><div class="number">0</div><div class="label">GPS records in stored files</div></div>
+      <div class="stat-card"><div class="number">15×</div><div class="label">Feed load time improvement</div></div>
+    </div>
+  </div>
+
+  <!-- SLIDE 15: Phased Delivery -->
+  <div class="slide cover">
+    <div class="slide-label">Delivery Plan</div>
+    <h2 style="margin-bottom:40px;">Phased Rollout</h2>
+    <div class="phases" style="width:100%;">
+      <div class="phase">
+        <div class="phase-num">Phase 1 · MVP</div>
+        <div class="phase-title">Core Pipeline</div>
+        <div class="phase-items">Upload (presign + binary)<br>Resize · Crop · Convert<br>CloudFront caching<br>ETag / 304</div>
+      </div>
+      <div class="phase">
+        <div class="phase-num">Phase 2 · Quality</div>
+        <div class="phase-title">Observability</div>
+        <div class="phase-items">Smart crop<br>Prometheus + Grafana<br>CloudWatch alarms<br>Internal benchmarks</div>
+      </div>
+      <div class="phase">
+        <div class="phase-num">Phase 3 · Features</div>
+        <div class="phase-title">Full Feature Set</div>
+        <div class="phase-items">Watermark · Blur<br>Pipeline endpoint<br>AVIF support<br>URL whitelist source</div>
+      </div>
+      <div class="phase">
+        <div class="phase-num">Phase 4 · Scale</div>
+        <div class="phase-title">Production Hardening</div>
+        <div class="phase-items">Auto-scaling policies<br>Multi-region readiness<br>Load testing<br>Runbook + SLAs</div>
+      </div>
+    </div>
+    <div style="margin-top:40px; color:#555; font-size:13px;">
+      Full spec: <code style="color:#FF8000;">docs/solution-proposal-image-service.md</code> &nbsp;·&nbsp;
+      Diagram: <code style="color:#FF8000;">docs/architecture-diagram.drawio</code>
+    </div>
+  </div>
+
+</div><!-- /deck -->
+
+<nav class="nav">
+  <button id="btnPrev" onclick="changeSlide(-1)" title="Previous (←)">←</button>
+  <span class="counter" id="counter">1 / 15</span>
+  <button id="btnNext" onclick="changeSlide(1)" title="Next (→)">→</button>
+</nav>
+
+<script>
+  let current = 0;
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+
+  function show(n) {
+    slides[current].classList.remove('active');
+    current = Math.max(0, Math.min(n, total - 1));
+    slides[current].classList.add('active');
+    document.getElementById('counter').textContent = (current + 1) + ' / ' + total;
+    document.getElementById('slideNum').textContent = (current + 1) + ' / ' + total;
+    document.getElementById('progressBar').style.width = ((current + 1) / total * 100) + '%';
+    document.getElementById('btnPrev').disabled = current === 0;
+    document.getElementById('btnNext').disabled = current === total - 1;
+  }
+
+  function changeSlide(dir) { show(current + dir); }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') changeSlide(1);
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')                     changeSlide(-1);
+    if (e.key === 'Home') show(0);
+    if (e.key === 'End')  show(total - 1);
+  });
+
+  show(0);
+</script>
+</body>
+</html>

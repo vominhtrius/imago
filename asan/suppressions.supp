@@ -1,0 +1,26 @@
+# ASan suppressions for known false positives in glib/vips/AWS SDK
+
+# GLib TLS initialisation — GLib stores data in TLS intentionally
+leak:g_private_get
+leak:g_private_set
+leak:g_static_private_get
+leak:g_static_private_set
+leak:g_thread_init
+
+# GLib type system — one-time registration is not a leak
+leak:g_type_register_static
+leak:g_type_register_fundamental
+leak:g_quark_from_string
+
+# libvips global state — intentionally lives for the process lifetime
+leak:vips_init
+leak:vips_type_init
+leak:vips_foreign_operation_init
+
+# OpenSSL one-time init (used by AWS SDK)
+leak:OPENSSL_init_ssl
+leak:CRYPTO_THREAD_run_once
+
+# AWS SDK CRT / event loop
+leak:aws_event_loop_new_default
+leak:aws_tls_ctx_new
