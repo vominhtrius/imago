@@ -47,8 +47,28 @@ export interface FetchResult {
   blob: Blob
   url: string
   contentType: string
+  /** Total client-measured round-trip (request → response body loaded). */
   durationMs: number
+  /** Server-side processing time parsed from the `Server-Timing` header. */
+  serverMs: number | null
   status: number
+}
+
+// `Server-Timing: imago;dur=12.34, other;dur=…` — find the `imago` entry.
+function parseServerTiming(header: string | null): number | null {
+  if (!header) return null
+  for (const part of header.split(',')) {
+    const [name, ...params] = part.trim().split(';')
+    if (name.trim() !== 'imago') continue
+    for (const p of params) {
+      const [k, v] = p.trim().split('=')
+      if (k === 'dur' && v) {
+        const n = Number(v)
+        if (Number.isFinite(n)) return n
+      }
+    }
+  }
+  return null
 }
 
 export async function fetchImago(url: string): Promise<FetchResult> {
@@ -61,6 +81,7 @@ export async function fetchImago(url: string): Promise<FetchResult> {
     throw new Error(`imago ${res.status}: ${text || res.statusText}`)
   }
 
+  const serverMs = parseServerTiming(res.headers.get('server-timing'))
   const blob = await res.blob()
   const objectUrl = URL.createObjectURL(blob)
   return {
@@ -68,6 +89,7 @@ export async function fetchImago(url: string): Promise<FetchResult> {
     url: objectUrl,
     contentType,
     durationMs: performance.now() - started,
+    serverMs,
     status: res.status,
   }
 }

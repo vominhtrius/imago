@@ -43,3 +43,27 @@ export async function extractMetadata(blob: Blob, contentType: string): Promise<
     exif,
   }
 }
+
+export function buildExifRows(
+  exif: Record<string, unknown> | undefined,
+): Array<[string, string]> {
+  if (!exif) return []
+  const out: Array<[string, string]> = []
+  for (const [k, v] of Object.entries(exif)) {
+    if (v === null || v === undefined) continue
+    let value: string
+    if (v instanceof Date) value = v.toISOString()
+    else if (typeof v === 'object') {
+      try {
+        value = JSON.stringify(v)
+      } catch {
+        value = String(v)
+      }
+    } else {
+      value = String(v)
+    }
+    if (value.length > 120) value = value.slice(0, 120) + '…'
+    out.push([k, value])
+  }
+  return out
+}

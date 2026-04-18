@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/select'
 import { NumberField } from '@/components/ui/slider-number'
 import { SourcePicker, type SourceState } from '@/components/SourcePicker'
+import { InputPreview } from '@/components/InputPreview'
 import { ResultPanel } from '@/components/ResultPanel'
 import { buildImagoUrl, fetchImago, type FetchResult, type Operation } from '@/lib/imago'
 import { useSettings } from '@/lib/settings'
@@ -107,6 +108,8 @@ export function FeatureForm({ operation, title, description, showResize, showCro
         </CardHeader>
         <CardContent className="grid gap-4">
           <SourcePicker value={source} onChange={setSource} />
+
+          <InputPreview source={source} />
 
           <div className="grid gap-3">
             <h4 className="text-sm font-semibold">Parameters</h4>

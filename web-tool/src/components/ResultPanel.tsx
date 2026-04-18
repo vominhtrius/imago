@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Copy, Download, ExternalLink } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Clock, Copy, Download, ExternalLink, Server } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { ExifSummary } from '@/components/ExifSummary'
 import type { FetchResult } from '@/lib/imago'
 import { extractMetadata, type ImageMetadata } from '@/lib/metadata'
 import { formatBytes } from '@/lib/utils'
@@ -35,8 +36,6 @@ export function ResultPanel({ result, requestUrl, error, loading }: Props) {
       if (result?.url) URL.revokeObjectURL(result.url)
     }
   }, [result])
-
-  const exifRows = useMemo(() => buildExifRows(meta?.exif), [meta])
 
   return (
     <Card className="h-full">
@@ -97,41 +96,120 @@ export function ResultPanel({ result, requestUrl, error, loading }: Props) {
         )}
 
         {result && (
-          <div className="grid gap-3 md:grid-cols-[2fr_1fr]">
-            <div className="overflow-hidden rounded-md border border-(--color-border) bg-(--color-muted)">
-              <img
-                src={result.url}
-                alt="imago result"
-                className="max-h-[520px] w-full object-contain"
-              />
+          <>
+            <TimingBar
+              serverMs={result.serverMs}
+              totalMs={result.durationMs}
+            />
+            <div className="grid gap-3 md:grid-cols-[2fr_1fr]">
+              <div className="overflow-hidden rounded-md border border-(--color-border) bg-(--color-muted)">
+                <img
+                  src={result.url}
+                  alt="imago result"
+                  className="max-h-[520px] w-full object-contain"
+                />
+              </div>
+              <div className="grid gap-2 text-sm">
+                <MetaRow label="Status" value={String(result.status)} />
+                <MetaRow label="Content-Type" value={result.contentType} />
+                <MetaRow label="Size" value={meta ? formatBytes(meta.bytes) : formatBytes(result.blob.size)} />
+                <MetaRow
+                  label="Dimensions"
+                  value={meta?.width && meta.height ? `${meta.width} × ${meta.height}` : '—'}
+                />
+                <ExifSummary exif={meta?.exif} />
+              </div>
             </div>
-            <div className="grid gap-2 text-sm">
-              <MetaRow label="Status" value={String(result.status)} />
-              <MetaRow label="Duration" value={`${result.durationMs.toFixed(0)} ms`} />
-              <MetaRow label="Content-Type" value={result.contentType} />
-              <MetaRow label="Size" value={meta ? formatBytes(meta.bytes) : formatBytes(result.blob.size)} />
-              <MetaRow
-                label="Dimensions"
-                value={meta?.width && meta.height ? `${meta.width} × ${meta.height}` : '—'}
-              />
-              {exifRows.length > 0 && (
-                <details className="rounded-md border border-(--color-border) p-2 text-xs">
-                  <summary className="cursor-pointer select-none font-medium">EXIF ({exifRows.length})</summary>
-                  <div className="mt-2 grid gap-1">
-                    {exifRows.map(([k, v]) => (
-                      <div key={k} className="grid grid-cols-[auto_1fr] gap-2">
-                        <span className="text-(--color-muted-foreground)">{k}</span>
-                        <span className="truncate font-mono">{v}</span>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
-            </div>
-          </div>
+          </>
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function TimingBar({
+  serverMs,
+  totalMs,
+}: {
+  serverMs: number | null
+  totalMs: number
+}) {
+  // Network + client decode time = total − server. If the server didn't
+  // emit Server-Timing we only know the total; show it as one pill.
+  const server = serverMs ?? 0
+  const network = Math.max(0, totalMs - server)
+  return (
+    <div className="grid gap-2 rounded-md border border-(--color-border) bg-(--color-muted)/50 p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-(--color-muted-foreground)">
+          Timing
+        </span>
+        <span className="text-base font-semibold tabular-nums">
+          {totalMs.toFixed(0)} ms
+          <span className="ml-1 text-xs font-normal text-(--color-muted-foreground)">
+            total
+          </span>
+        </span>
+      </div>
+      {serverMs !== null && (
+        <>
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <Pill
+              icon={<Server className="h-3.5 w-3.5" />}
+              label="Server"
+              value={`${server.toFixed(1)} ms`}
+              hint="imago processing"
+            />
+            <Pill
+              icon={<Clock className="h-3.5 w-3.5" />}
+              label="Network"
+              value={`${network.toFixed(1)} ms`}
+              hint="transit + decode"
+            />
+            <Pill
+              label="Share"
+              value={`${((server / totalMs) * 100).toFixed(0)}%`}
+              hint="server / total"
+            />
+          </div>
+          <div
+            className="flex h-1.5 overflow-hidden rounded-full bg-(--color-border)"
+            role="img"
+            aria-label={`server ${server.toFixed(1)}ms of ${totalMs.toFixed(1)}ms total`}
+          >
+            <div
+              className="bg-(--color-primary)"
+              style={{ width: `${Math.min(100, (server / totalMs) * 100)}%` }}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function Pill({
+  icon,
+  label,
+  value,
+  hint,
+}: {
+  icon?: React.ReactNode
+  label: string
+  value: string
+  hint?: string
+}) {
+  return (
+    <div
+      className="grid gap-0.5 rounded-md border border-(--color-border) bg-(--color-background) p-2"
+      title={hint}
+    >
+      <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-(--color-muted-foreground)">
+        {icon}
+        {label}
+      </span>
+      <span className="font-mono text-sm tabular-nums">{value}</span>
+    </div>
   )
 }
 
@@ -144,24 +222,3 @@ function MetaRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-function buildExifRows(exif: Record<string, unknown> | undefined): Array<[string, string]> {
-  if (!exif) return []
-  const out: Array<[string, string]> = []
-  for (const [k, v] of Object.entries(exif)) {
-    if (v === null || v === undefined) continue
-    let value: string
-    if (v instanceof Date) value = v.toISOString()
-    else if (typeof v === 'object') {
-      try {
-        value = JSON.stringify(v)
-      } catch {
-        value = String(v)
-      }
-    } else {
-      value = String(v)
-    }
-    if (value.length > 120) value = value.slice(0, 120) + '…'
-    out.push([k, value])
-  }
-  return out
-}
