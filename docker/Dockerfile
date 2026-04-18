@@ -102,6 +102,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
     libvips42 \
+    libheif-plugin-aomenc libheif-plugin-libde265 \
     libssl3 zlib1g libjsoncpp25 libuuid1 \
     libc-ares2 \
     libjemalloc2 \

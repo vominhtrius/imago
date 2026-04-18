@@ -10,7 +10,7 @@ struct AppConfig {
     std::string s3_endpoint_url;
     bool        s3_force_path_style = false;
     int         thread_pool_size    = static_cast<int>(std::thread::hardware_concurrency());
-    int         s3_executor_threads = static_cast<int>(std::thread::hardware_concurrency()) * 2;
+    int         s3_executor_threads = 8;
     int         drogon_workers      = static_cast<int>(std::thread::hardware_concurrency());
     int         port                = 8080;
     int         max_src_resolution_mp = 50; // megapixels; 0 = disabled

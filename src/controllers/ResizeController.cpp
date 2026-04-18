@@ -20,6 +20,8 @@ drogon::Task<drogon::HttpResponsePtr> ResizeController::handle(
         co_return bad_request("invalid 'w'");
     if (!parse_int(req->getParameter("h"), img_req.h))
         co_return bad_request("invalid 'h'");
+    if (img_req.w <= 0 && img_req.h <= 0)
+        co_return bad_request("'w' or 'h' is required (use /convert to only transcode)");
     if (!parse_fit(req->getParameter("fit"), img_req.fit))
         co_return bad_request("invalid 'fit' (fit|fill|fill-down|force)");
     if (!parse_output(req->getParameter("output"), img_req.output))

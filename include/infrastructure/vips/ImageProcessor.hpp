@@ -32,7 +32,8 @@ public:
 
 private:
     drogon::Task<std::string> submit(
-        std::function<std::string()> job);
+        std::vector<uint8_t> buf,
+        std::function<std::string(const std::vector<uint8_t>&)> job);
 
     static std::string save_image(VipsImage* img, OutputFormat fmt, int quality);
 

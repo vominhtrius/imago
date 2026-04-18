@@ -2,6 +2,8 @@
 #include <drogon/drogon.h>
 #include <aws/core/Aws.h>
 #include <vips/vips.h>
+#include <chrono>
+#include <cstdio>
 #include <iostream>
 
 int main() {
@@ -46,11 +48,35 @@ int main() {
     Json::Value drogon_cfg;
     drogon_cfg["plugins"] = plugins;
 
+    // Record a monotonic start timestamp on every inbound request, then
+    // emit it as `Server-Timing: imago;dur=<ms>` on the response so clients
+    // (and browser devtools) can see the server-side processing time.
+    // Same-origin in our setup, but we also expose the header via CORS so
+    // direct cross-origin fetches can read it.
     drogon::app()
         .loadConfigJson(drogon_cfg)
         .setThreadNum(cfg.drogon_workers)
         .addListener("0.0.0.0", cfg.port)
         .setMaxConnectionNum(2048)
+        .registerPreRoutingAdvice([](const drogon::HttpRequestPtr& req) {
+            req->attributes()->insert(
+                "imago_start", std::chrono::steady_clock::now());
+        })
+        .registerPreSendingAdvice(
+            [](const drogon::HttpRequestPtr& req,
+               const drogon::HttpResponsePtr& resp) {
+                auto attrs = req->attributes();
+                if (!attrs->find("imago_start")) return;
+                auto start = attrs->get<std::chrono::steady_clock::time_point>(
+                    "imago_start");
+                auto ms = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - start).count();
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "imago;dur=%.2f", ms);
+                resp->addHeader("Server-Timing", buf);
+                resp->addHeader("Access-Control-Expose-Headers",
+                                "Server-Timing");
+            })
         .registerBeginningAdvice([] {
             std::cerr << "Drogon event loop started, listening..." << std::endl;
         })

@@ -60,11 +60,27 @@ drogon::Task<std::vector<uint8_t>> S3ClientWrapper::download(
                     const std::shared_ptr<const Aws::Client::AsyncCallerContext>&)
                 {
                     if (outcome.IsSuccess()) {
-                        auto& body = outcome.GetResult().GetBody();
-                        std::ostringstream oss;
-                        oss << body.rdbuf();
-                        const auto& str = oss.str();
-                        state->buffer.assign(str.begin(), str.end());
+                        auto& result = outcome.GetResult();
+                        auto& body   = result.GetBody();
+                        const long long len = result.GetContentLength();
+                        if (len > 0) {
+                            state->buffer.resize(static_cast<size_t>(len));
+                            size_t total = 0;
+                            while (total < static_cast<size_t>(len) && body) {
+                                body.read(
+                                    reinterpret_cast<char*>(state->buffer.data() + total),
+                                    static_cast<std::streamsize>(len - total));
+                                const auto got = body.gcount();
+                                if (got <= 0) break;
+                                total += static_cast<size_t>(got);
+                            }
+                            state->buffer.resize(total);
+                        } else {
+                            std::ostringstream oss;
+                            oss << body.rdbuf();
+                            const auto& str = oss.str();
+                            state->buffer.assign(str.begin(), str.end());
+                        }
                     } else {
                         auto err = outcome.GetError();
                         state->error_message = err.GetMessage();
