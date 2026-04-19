@@ -260,6 +260,12 @@ static void strip_sensitive_metadata(VipsImage* img) {
     // vips metadata names in case the loader stored them under a distinct key.
     vips_image_remove(img, VIPS_META_XMP_NAME);
     vips_image_remove(img, VIPS_META_IPTC_NAME);
+
+    // Drop the embedded JPEG thumbnail that libvips stashes separately
+    // from the `exif-data` blob. Without this the JPEG save re-emits the
+    // source's IFD1 thumbnail (typically ~18 KB), dwarfing the resized
+    // output for small thumbnails. imgproxy strips it the same way.
+    vips_image_remove(img, "jpeg-thumbnail-data");
 }
 
 // --- save -------------------------------------------------------------------
