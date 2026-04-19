@@ -19,6 +19,13 @@ public:
     drogon::Task<std::vector<uint8_t>> download(
         const std::string& bucket, const std::string& key);
 
+    // Drops the AWS S3 client (and the PooledThreadExecutor it owns,
+    // whose destructor joins worker threads). Must run before
+    // Aws::ShutdownAPI so that any in-flight callback has completed
+    // before the SDK is torn down.
+    void shutdown();
+
 private:
     std::shared_ptr<Aws::S3::S3Client> client_;
+    long long                          max_object_size_bytes_ = 0;   // 0 = unlimited
 };

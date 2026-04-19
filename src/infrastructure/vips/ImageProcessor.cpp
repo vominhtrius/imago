@@ -15,9 +15,13 @@ static void vips_worker_thread_exit() { vips_thread_shutdown(); }
 
 static void check_src_resolution(VipsImage* img, int max_mp) {
     if (max_mp <= 0) return;
-    const long px = (long)vips_image_get_width(img) * vips_image_get_height(img);
-    if (px > (long)max_mp * 1'000'000) {
-        vips_error_clear();
+    // Use 64-bit arithmetic — a 40000×40000 source (1.6 Gpx) overflows `long`
+    // on 32-bit platforms. The comparison below must also be 64-bit.
+    const long long px = static_cast<long long>(vips_image_get_width(img)) *
+                         static_cast<long long>(vips_image_get_height(img));
+    if (px > static_cast<long long>(max_mp) * 1'000'000LL) {
+        // No vips error was set at this point — width/height getters don't
+        // populate the error buffer. Don't clobber unrelated state.
         throw HttpException(drogon::k413RequestEntityTooLarge,
             "source image resolution exceeds limit");
     }
@@ -347,6 +351,12 @@ std::string ImageProcessor::save_image(VipsImage* img, OutputFormat fmt, int qua
                 "Q", q, "effort", 5, "keep", keep, NULL);
         break;
     }
+    default:
+        // Defence in depth: OutputFormat is a closed enum, but a future
+        // addition that forgets to extend this switch would otherwise return
+        // an empty `sink` while leaking `target`. Free + throw instead.
+        g_object_unref(target);
+        throw std::runtime_error("save_image: unsupported OutputFormat");
     }
 
     g_object_unref(target);
@@ -568,32 +578,70 @@ drogon::Task<std::string> ImageProcessor::submit(
         std::string                                                result;
         std::exception_ptr                                         exc;
     };
+    // See S3Client.cpp for the rationale — same pattern here. The worker
+    // thread runs `job` on state->buf, then resumes via this guard so a
+    // frame destroyed in flight is never touched again (fixes C1).
+    struct CancelGuard {
+        std::mutex m;
+        bool       alive = true;
+    };
     auto state = std::make_shared<State>();
     state->buf = std::move(buf);
     state->job = std::move(job);
+    auto guard = std::make_shared<CancelGuard>();
+
+    // C2: check queue-full BEFORE entering the awaiter. Throwing from
+    // await_suspend is legal per C++20 (compiler resumes the coroutine with
+    // the exception), but it's a notoriously fragile corner — some runtimes
+    // have shipped bugs around it, and the contract differs subtly between
+    // compilers. Rejecting here — before we ever suspend — propagates the
+    // exception through Drogon's Task<> machinery via the normal coroutine
+    // exit path.
+    {
+        std::unique_lock lock(mu_);
+        if (max_queue_size_ > 0 &&
+            static_cast<int>(queue_.size()) >= max_queue_size_)
+        {
+            lock.unlock();
+            throw HttpException(drogon::k429TooManyRequests, "too many requests");
+        }
+    }
 
     struct Awaiter {
-        ImageProcessor*          self;
-        std::shared_ptr<State>   state;
-        trantor::EventLoop*      loop;
+        ImageProcessor*              self;
+        std::shared_ptr<State>       state;
+        std::shared_ptr<CancelGuard> guard;
+        trantor::EventLoop*          loop;
+
+        ~Awaiter() {
+            std::lock_guard lk(guard->m);
+            guard->alive = false;
+        }
 
         bool await_ready() { return false; }
 
         void await_suspend(std::coroutine_handle<> h) {
-            std::unique_lock lock(self->mu_);
-            if (self->max_queue_size_ > 0 &&
-                (int)self->queue_.size() >= self->max_queue_size_)
+            // No throwing path here: queue-full was rejected above, and
+            // queue_.push / notify_one cannot throw in practice (std::deque
+            // push may throw bad_alloc, but that aborts the whole request
+            // cleanly via the coroutine's unhandled-exception handler — and
+            // we still own the frame at this point because nothing external
+            // has been told to resume us yet).
             {
-                lock.unlock();
-                throw HttpException(drogon::k429TooManyRequests, "too many requests");
+                std::unique_lock lock(self->mu_);
+                self->queue_.push([state = state, guard = guard, loop = loop, h]() mutable {
+                    try   { state->result = state->job(state->buf); }
+                    catch (...) { state->exc = std::current_exception(); }
+                    auto resume_if_alive = [guard, h]() mutable {
+                        std::unique_lock lk(guard->m);
+                        if (!guard->alive) return;
+                        lk.unlock();   // never resume under the lock — see S3Client.cpp
+                        h.resume();
+                    };
+                    if (loop) loop->queueInLoop(std::move(resume_if_alive));
+                    else       resume_if_alive();
+                });
             }
-            self->queue_.push([state = state, loop = loop, h]() mutable {
-                try   { state->result = state->job(state->buf); }
-                catch (...) { state->exc = std::current_exception(); }
-                if (loop) loop->queueInLoop([h]() mutable { h.resume(); });
-                else       h.resume();
-            });
-            lock.unlock();
             self->cv_.notify_one();
         }
 
@@ -603,7 +651,7 @@ drogon::Task<std::string> ImageProcessor::submit(
         }
     };
 
-    co_return co_await Awaiter{this, state, loop};
+    co_return co_await Awaiter{this, state, guard, loop};
 }
 
 drogon::Task<std::string> ImageProcessor::resize(

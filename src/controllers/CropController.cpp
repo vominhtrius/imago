@@ -16,10 +16,10 @@ drogon::Task<drogon::HttpResponsePtr> CropController::handle(
     img_req.bucket = std::move(bucket);
     img_req.key    = std::move(key);
 
-    if (!parse_int(req->getParameter("w"), img_req.w) || img_req.w <= 0)
-        co_return bad_request("'w' is required and must be > 0");
-    if (!parse_int(req->getParameter("h"), img_req.h) || img_req.h <= 0)
-        co_return bad_request("'h' is required and must be > 0");
+    if (!parse_dim(req->getParameter("w"), img_req.w) || img_req.w <= 0)
+        co_return bad_request("'w' is required and must be in 1..16384");
+    if (!parse_dim(req->getParameter("h"), img_req.h) || img_req.h <= 0)
+        co_return bad_request("'h' is required and must be in 1..16384");
     if (!parse_gravity(req->getParameter("gravity"), img_req.gravity,
                        img_req.fp_x, img_req.fp_y))
         co_return bad_request(

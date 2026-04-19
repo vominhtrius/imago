@@ -16,10 +16,10 @@ drogon::Task<drogon::HttpResponsePtr> ResizeController::handle(
     img_req.bucket = std::move(bucket);
     img_req.key    = std::move(key);
 
-    if (!parse_int(req->getParameter("w"), img_req.w))
-        co_return bad_request("invalid 'w'");
-    if (!parse_int(req->getParameter("h"), img_req.h))
-        co_return bad_request("invalid 'h'");
+    if (!parse_dim(req->getParameter("w"), img_req.w))
+        co_return bad_request("invalid 'w' (0..16384)");
+    if (!parse_dim(req->getParameter("h"), img_req.h))
+        co_return bad_request("invalid 'h' (0..16384)");
     if (img_req.w <= 0 && img_req.h <= 0)
         co_return bad_request("'w' or 'h' is required (use /convert to only transcode)");
     if (!parse_fit(req->getParameter("fit"), img_req.fit))

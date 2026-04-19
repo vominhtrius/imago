@@ -76,6 +76,18 @@ inline bool parse_int(const std::string& s, int& out) {
     return ec == std::errc{} && ptr == s.data() + s.size() && out >= 0;
 }
 
+// H5: cap output dimensions at the controller boundary. libvips allocates
+// intermediates proportional to w × h × bands; an unclamped `?w=INT_MAX`
+// request would attempt a multi-gigabyte alloc before any megapixel check
+// on the source could fire. 16384 matches the `MAX_RESOLUTION_DIMENSION`
+// imgproxy uses as its default per-dimension guard.
+inline constexpr int kMaxOutputDimension = 16384;
+
+inline bool parse_dim(const std::string& s, int& out) {
+    if (!parse_int(s, out)) return false;
+    return out <= kMaxOutputDimension;
+}
+
 inline bool parse_fit(const std::string& s, FitMode& out) {
     if (s.empty() || s == "fit")  { out = FitMode::Fit;      return true; }
     if (s == "fill")              { out = FitMode::Fill;     return true; }

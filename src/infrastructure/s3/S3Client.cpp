@@ -4,9 +4,11 @@
 #include <aws/s3/model/GetObjectRequest.h>
 #include <aws/s3/S3Errors.h>
 #include <trantor/net/EventLoop.h>
-#include <sstream>
+#include <vector>
 
-S3ClientWrapper::S3ClientWrapper(const AppConfig& cfg) {
+S3ClientWrapper::S3ClientWrapper(const AppConfig& cfg)
+    : max_object_size_bytes_(cfg.max_object_size_bytes)
+{
     Aws::Client::ClientConfiguration aws_cfg;
     aws_cfg.region         = cfg.aws_region;
     aws_cfg.maxConnections = 128;
@@ -26,24 +28,52 @@ S3ClientWrapper::S3ClientWrapper(const AppConfig& cfg) {
     client_ = std::make_shared<Aws::S3::S3Client>(creds, nullptr, s3_cfg);
 }
 
+void S3ClientWrapper::shutdown() {
+    // Dropping the shared_ptr<S3Client> transitively destroys the
+    // PooledThreadExecutor we injected via ClientConfiguration; that
+    // destructor joins its worker threads, so any currently-running
+    // GetObjectAsync callback finishes before we return.
+    client_.reset();
+}
+
 drogon::Task<std::vector<uint8_t>> S3ClientWrapper::download(
     const std::string& bucket, const std::string& key)
 {
-    auto* loop = trantor::EventLoop::getEventLoopOfCurrentThread();
+    auto* loop                    = trantor::EventLoop::getEventLoopOfCurrentThread();
+    const long long max_bytes     = max_object_size_bytes_;
 
     struct S3State {
         std::vector<uint8_t> buffer;
         std::string          error_message;
         int                  error_http_code = 500;
     };
+    // CancelGuard serialises coroutine-frame teardown against the
+    // async callback's resume path. The awaiter's destructor flips
+    // alive=false under the mutex; the callback checks it under the
+    // same mutex before touching the coroutine handle. If Drogon
+    // tears down the Task mid-flight (shutdown, or future request
+    // cancellation), the callback bails instead of resuming a freed
+    // frame (fixes C1).
+    struct CancelGuard {
+        std::mutex m;
+        bool       alive = true;
+    };
     auto state = std::make_shared<S3State>();
+    auto guard = std::make_shared<CancelGuard>();
 
     struct S3Awaiter {
-        Aws::S3::S3Client*       client;
-        std::string              bucket;
-        std::string              key;
-        trantor::EventLoop*      loop;
-        std::shared_ptr<S3State> state;
+        Aws::S3::S3Client*           client;
+        std::string                  bucket;
+        std::string                  key;
+        trantor::EventLoop*          loop;
+        std::shared_ptr<S3State>     state;
+        std::shared_ptr<CancelGuard> guard;
+        long long                    max_bytes;   // 0 = unlimited
+
+        ~S3Awaiter() {
+            std::lock_guard lk(guard->m);
+            guard->alive = false;
+        }
 
         bool await_ready() { return false; }
 
@@ -53,7 +83,7 @@ drogon::Task<std::vector<uint8_t>> S3ClientWrapper::download(
             req.SetKey(key);
 
             client->GetObjectAsync(req,
-                [state = state, loop = loop, h](
+                [state = state, guard = guard, loop = loop, max_bytes = max_bytes, h](
                     const Aws::S3::S3Client*,
                     const Aws::S3::Model::GetObjectRequest&,
                     Aws::S3::Model::GetObjectOutcome&& outcome,
@@ -63,7 +93,14 @@ drogon::Task<std::vector<uint8_t>> S3ClientWrapper::download(
                         auto& result = outcome.GetResult();
                         auto& body   = result.GetBody();
                         const long long len = result.GetContentLength();
-                        if (len > 0) {
+                        // H1: reject oversized objects BEFORE vector::resize —
+                        // otherwise a hostile/misconfigured endpoint advertising
+                        // a huge Content-Length would force a multi-GB alloc.
+                        if (max_bytes > 0 && len > max_bytes) {
+                            state->error_http_code = 413;
+                            state->error_message   =
+                                "source object exceeds max_object_size_bytes";
+                        } else if (len > 0) {
                             state->buffer.resize(static_cast<size_t>(len));
                             size_t total = 0;
                             while (total < static_cast<size_t>(len) && body) {
@@ -76,10 +113,28 @@ drogon::Task<std::vector<uint8_t>> S3ClientWrapper::download(
                             }
                             state->buffer.resize(total);
                         } else {
-                            std::ostringstream oss;
-                            oss << body.rdbuf();
-                            const auto& str = oss.str();
-                            state->buffer.assign(str.begin(), str.end());
+                            // No Content-Length advertised — read in chunks and
+                            // enforce the same size cap as the length-known path.
+                            constexpr size_t kChunk = 64 * 1024;
+                            std::vector<char> chunk(kChunk);
+                            while (body) {
+                                body.read(chunk.data(),
+                                          static_cast<std::streamsize>(kChunk));
+                                const auto got = body.gcount();
+                                if (got <= 0) break;
+                                if (max_bytes > 0 &&
+                                    state->buffer.size() + static_cast<size_t>(got)
+                                        > static_cast<size_t>(max_bytes))
+                                {
+                                    state->error_http_code = 413;
+                                    state->error_message   =
+                                        "source object exceeds max_object_size_bytes";
+                                    state->buffer.clear();
+                                    break;
+                                }
+                                state->buffer.insert(state->buffer.end(),
+                                    chunk.data(), chunk.data() + got);
+                            }
                         }
                     } else {
                         auto err = outcome.GetError();
@@ -94,8 +149,16 @@ drogon::Task<std::vector<uint8_t>> S3ClientWrapper::download(
                             state->error_http_code = 502;
                     }
 
-                    if (loop) loop->queueInLoop([h]() mutable { h.resume(); });
-                    else      h.resume();
+                    auto resume_if_alive = [guard, h]() mutable {
+                        std::unique_lock lk(guard->m);
+                        if (!guard->alive) return;
+                        lk.unlock();   // never call h.resume() under the lock:
+                                       // the resumed coroutine's eventual
+                                       // frame destruction re-acquires it.
+                        h.resume();
+                    };
+                    if (loop) loop->queueInLoop(std::move(resume_if_alive));
+                    else      resume_if_alive();
                 });
         }
 
@@ -106,5 +169,5 @@ drogon::Task<std::vector<uint8_t>> S3ClientWrapper::download(
         }
     };
 
-    co_return co_await S3Awaiter{client_.get(), bucket, key, loop, state};
+    co_return co_await S3Awaiter{client_.get(), bucket, key, loop, state, guard, max_bytes};
 }
