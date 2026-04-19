@@ -6,51 +6,53 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  /* Light theme — purple-accented, neutral surfaces. */
+  /* Light theme — Munsell "Purple" primary (#9F00C5 ≈ oklch hue 316°),
+     neutral surfaces. */
   --color-background: oklch(1 0 0);
   --color-foreground: oklch(0.145 0 0);
   --color-card: oklch(1 0 0);
   --color-card-foreground: oklch(0.145 0 0);
   --color-popover: oklch(1 0 0);
   --color-popover-foreground: oklch(0.145 0 0);
-  --color-muted: oklch(0.97 0.004 286);
+  --color-muted: oklch(0.97 0.004 316);
   --color-muted-foreground: oklch(0.556 0 0);
-  --color-primary: oklch(0.606 0.25 292.717);
-  --color-primary-foreground: oklch(0.985 0.001 286);
-  --color-secondary: oklch(0.97 0.004 286);
+  --color-primary: oklch(0.497 0.278 316);
+  --color-primary-foreground: oklch(0.985 0.001 316);
+  --color-secondary: oklch(0.97 0.004 316);
   --color-secondary-foreground: oklch(0.205 0 0);
-  /* Accent carries a subtle purple tint so outline/ghost button hovers and
-     select-item focus pick up the theme without overwhelming the UI. */
-  --color-accent: oklch(0.955 0.034 292.717);
-  --color-accent-foreground: oklch(0.34 0.18 292.717);
+  /* Accent carries a subtle Munsell-purple tint so outline/ghost button
+     hovers and select-item focus pick up the theme without overwhelming
+     the UI. */
+  --color-accent: oklch(0.955 0.034 316);
+  --color-accent-foreground: oklch(0.34 0.18 316);
   --color-destructive: oklch(0.577 0.245 27.325);
   --color-destructive-foreground: oklch(0.985 0 0);
   --color-border: oklch(0.922 0 0);
   --color-input: oklch(0.922 0 0);
-  --color-ring: oklch(0.606 0.25 292.717);
+  --color-ring: oklch(0.497 0.278 316);
   --radius: 0.625rem;
 }
 
 .dark {
   --color-background: oklch(0.145 0 0);
   --color-foreground: oklch(0.985 0 0);
-  --color-card: oklch(0.21 0.006 286);
+  --color-card: oklch(0.21 0.006 316);
   --color-card-foreground: oklch(0.985 0 0);
-  --color-popover: oklch(0.21 0.006 286);
+  --color-popover: oklch(0.21 0.006 316);
   --color-popover-foreground: oklch(0.985 0 0);
-  --color-muted: oklch(0.274 0.006 286);
+  --color-muted: oklch(0.274 0.006 316);
   --color-muted-foreground: oklch(0.708 0 0);
-  --color-primary: oklch(0.647 0.249 292.717);
-  --color-primary-foreground: oklch(0.985 0.001 286);
-  --color-secondary: oklch(0.274 0.006 286);
+  --color-primary: oklch(0.62 0.26 316);
+  --color-primary-foreground: oklch(0.985 0.001 316);
+  --color-secondary: oklch(0.274 0.006 316);
   --color-secondary-foreground: oklch(0.985 0 0);
-  --color-accent: oklch(0.32 0.09 292.717);
-  --color-accent-foreground: oklch(0.985 0.001 286);
+  --color-accent: oklch(0.32 0.09 316);
+  --color-accent-foreground: oklch(0.985 0.001 316);
   --color-destructive: oklch(0.704 0.191 22.216);
   --color-destructive-foreground: oklch(0.985 0 0);
   --color-border: oklch(1 0 0 / 10%);
   --color-input: oklch(1 0 0 / 15%);
-  --color-ring: oklch(0.647 0.249 292.717);
+  --color-ring: oklch(0.62 0.26 316);
 }
 
 html, body, #root {

@@ -1,67 +1,48 @@
 import * as React from 'react'
 
-export type Theme = 'light' | 'dark' | 'system'
-export type ResolvedTheme = 'light' | 'dark'
+export type Theme = 'light' | 'dark'
 
 const STORAGE_KEY = 'imago-playground.theme.v1'
-
-function readStored(): Theme {
-  try {
-    const v = localStorage.getItem(STORAGE_KEY)
-    if (v === 'light' || v === 'dark' || v === 'system') return v
-  } catch {}
-  return 'system'
-}
 
 function systemPrefersDark() {
   return window.matchMedia('(prefers-color-scheme: dark)').matches
 }
 
-function resolve(theme: Theme): ResolvedTheme {
-  if (theme === 'system') return systemPrefersDark() ? 'dark' : 'light'
-  return theme
+function readInitial(): Theme {
+  try {
+    const v = localStorage.getItem(STORAGE_KEY)
+    if (v === 'light' || v === 'dark') return v
+  } catch {}
+  return systemPrefersDark() ? 'dark' : 'light'
 }
 
-function apply(resolved: ResolvedTheme) {
-  const root = document.documentElement
-  root.classList.toggle('dark', resolved === 'dark')
+function apply(theme: Theme) {
+  document.documentElement.classList.toggle('dark', theme === 'dark')
 }
 
 interface ThemeContextValue {
   theme: Theme
-  resolved: ResolvedTheme
   setTheme: (t: Theme) => void
+  toggle: () => void
 }
 
 const ThemeContext = React.createContext<ThemeContextValue | null>(null)
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = React.useState<Theme>(() => readStored())
-  const [resolved, setResolved] = React.useState<ResolvedTheme>(() => resolve(readStored()))
+  const [theme, setThemeState] = React.useState<Theme>(readInitial)
 
   React.useEffect(() => {
-    const r = resolve(theme)
-    setResolved(r)
-    apply(r)
+    apply(theme)
     try { localStorage.setItem(STORAGE_KEY, theme) } catch {}
   }, [theme])
 
-  // Follow the OS when the user picks "system" and changes their preference.
-  React.useEffect(() => {
-    if (theme !== 'system') return
-    const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const onChange = () => {
-      const r: ResolvedTheme = mq.matches ? 'dark' : 'light'
-      setResolved(r)
-      apply(r)
-    }
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [theme])
-
   const value = React.useMemo<ThemeContextValue>(
-    () => ({ theme, resolved, setTheme: setThemeState }),
-    [theme, resolved],
+    () => ({
+      theme,
+      setTheme: setThemeState,
+      toggle: () => setThemeState((t) => (t === 'dark' ? 'light' : 'dark')),
+    }),
+    [theme],
   )
   return React.createElement(ThemeContext.Provider, { value }, children)
 }
