@@ -1,4 +1,4 @@
-# imago web-tool
+# imago playground
 
 Browser playground for the imago HTTP API (`/resize`, `/crop`, `/convert`).
 Built with Vite + React + TypeScript + Tailwind v4 + shadcn-style primitives.
@@ -20,7 +20,7 @@ Built with Vite + React + TypeScript + Tailwind v4 + shadcn-style primitives.
 ## Quick start
 
 ```bash
-cd web-tool
+cd playground
 npm install
 npm run dev
 ```

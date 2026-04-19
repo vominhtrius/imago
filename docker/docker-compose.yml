@@ -58,7 +58,7 @@ services:
     depends_on:
       - minio
 
-  # Enabled by the `web` profile so the web-tool can call imago and imgproxy
+  # Enabled by the `web` profile so the playground can call imago and imgproxy
   # side-by-side for comparison. Config mirrors benchmark/docker-compose.yml
   # for apples-to-apples behaviour, plus IMGPROXY_TTL=0 so the browser and any
   # intermediaries don't cache responses between runs.
@@ -101,18 +101,18 @@ services:
       - minio-data:/data
 
   # React playground for the imago API.
-  # Run with: docker compose --profile web up -d web-tool
-  # Then open http://localhost:${WEB_TOOL_PORT:-5173}
+  # Run with: docker compose --profile web up -d playground
+  # Then open http://localhost:${PLAYGROUND_PORT:-5173}
   # nginx inside the container reverse-proxies /api/imago -> imago:8080
   # over the compose network, so the browser only sees a single origin.
   # The S3 SDK in the browser talks directly to MinIO on 9000.
-  web-tool:
+  playground:
     build:
-      context: ../web-tool
+      context: ../playground
       dockerfile: Dockerfile
     profiles: [web]
     ports:
-      - "${WEB_TOOL_PORT:-5173}:80"
+      - "${PLAYGROUND_PORT:-5173}:80"
     environment:
       - NGINX_ENTRYPOINT_QUIET_LOGS=1
     depends_on:

@@ -12,7 +12,7 @@ export interface AppSettings {
   s3KeyPrefix: string
 }
 
-const STORAGE_KEY = 'imago-web-tool.settings.v1'
+const STORAGE_KEY = 'imago-playground.settings.v1'
 
 // Defaults wired for the docker-compose `web` profile stack:
 //   nginx reverse-proxies /api/imago → imago:8080 and /api/imgproxy → imgproxy:8080.
