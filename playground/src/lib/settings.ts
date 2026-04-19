@@ -41,6 +41,32 @@ export function loadSettings(): AppSettings {
   }
 }
 
+// Throws when the payload doesn't look like settings JSON — caller is
+// expected to surface the message in the UI.
+export function parseSettingsJson(raw: string): AppSettings {
+  const parsed = JSON.parse(raw) as unknown
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('JSON payload is not an object')
+  }
+  // Shallow-merge onto defaults so old exports missing new fields still
+  // load, and unknown fields are silently dropped.
+  const merged: AppSettings = { ...DEFAULT_SETTINGS }
+  for (const k of Object.keys(DEFAULT_SETTINGS) as Array<keyof AppSettings>) {
+    const v = (parsed as Record<string, unknown>)[k]
+    if (v === undefined) continue
+    const expected = typeof DEFAULT_SETTINGS[k]
+    if (typeof v !== expected) {
+      throw new Error(`field "${k}" should be ${expected}, got ${typeof v}`)
+    }
+    ;(merged as unknown as Record<string, unknown>)[k] = v
+  }
+  return merged
+}
+
+export function settingsToJson(s: AppSettings): string {
+  return JSON.stringify(s, null, 2)
+}
+
 export function saveSettings(s: AppSettings) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
 }

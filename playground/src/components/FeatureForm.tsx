@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Play, Loader2 } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { Play, Loader2, HelpCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { NumberField } from '@/components/ui/slider-number'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { SourcePicker, type SourceState } from '@/components/SourcePicker'
 import { InputPreview } from '@/components/InputPreview'
 import { ResultPanel, type ServiceOutcome } from '@/components/ResultPanel'
@@ -41,6 +42,83 @@ const GRAVITIES: Array<{ value: string; label: string }> = [
   { value: 'sm', label: 'sm — smart' },
   { value: 'entropy', label: 'entropy (imago only)' },
 ]
+
+function LabelWithHint({ label, hint }: { label: string; hint: ReactNode }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <Label>{label}</Label>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={`${label} help`}
+            className="text-(--color-muted-foreground) hover:text-(--color-foreground) focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-(--color-ring) rounded-full"
+          >
+            <HelpCircle className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right" align="start" className="max-w-sm text-left">
+          {hint}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  )
+}
+
+// Short, practical descriptions — users mostly want to know "what does each
+// option actually do to my image" without clicking into the imgproxy docs.
+const FIT_HINT = (
+  <div className="grid gap-1.5">
+    <p>
+      Sizing strategy when both <code>w</code> and <code>h</code> are set.
+    </p>
+    <ul className="grid gap-1">
+      <li>
+        <b>fit</b> — scale down to fit inside the box; keeps aspect ratio, may
+        leave the image smaller than requested on one axis.
+      </li>
+      <li>
+        <b>fill</b> — scale to cover the box, then crop the overflow (uses
+        gravity). Output exactly matches the requested size.
+      </li>
+      <li>
+        <b>fill-down</b> — same as fill, but never upscales.
+      </li>
+      <li>
+        <b>force</b> — stretch to exactly <code>w×h</code>, ignoring aspect
+        ratio.
+      </li>
+    </ul>
+  </div>
+)
+
+const GRAVITY_HINT = (
+  <div className="grid gap-1.5">
+    <p>Which part of the image to keep when cropping.</p>
+    <ul className="grid gap-1">
+      <li>
+        <b>ce</b> — center (default)
+      </li>
+      <li>
+        <b>no / so / ea / we</b> — north / south / east / west edges
+      </li>
+      <li>
+        <b>noea / nowe / soea / sowe</b> — corners
+      </li>
+      <li>
+        <b>sm</b> — smart: libvips picks the most salient region (attention)
+      </li>
+      <li>
+        <b>entropy</b> — imago-only: picks the highest-entropy region. imgproxy
+        doesn't support this, so the comparison leg is skipped.
+      </li>
+    </ul>
+    <p className="text-(--color-muted-foreground)">
+      <b>fp:X:Y</b> (not shown) — focus point at normalized coords 0–1. Supply
+      via URL <code>gravity=fp:0.25:0.7</code>.
+    </p>
+  </div>
+)
 
 interface ParamsState {
   w: number | ''
@@ -241,7 +319,7 @@ export function FeatureForm({ operation, title, description, showResize, showCro
 
             {showResize && (
               <div className="grid gap-1">
-                <Label>Fit</Label>
+                <LabelWithHint label="Fit" hint={FIT_HINT} />
                 <Select
                   value={params.fit}
                   onValueChange={(v) => setParams((p) => ({ ...p, fit: v }))}
@@ -263,7 +341,7 @@ export function FeatureForm({ operation, title, description, showResize, showCro
 
             {showCrop && (
               <div className="grid gap-1">
-                <Label>Gravity</Label>
+                <LabelWithHint label="Gravity" hint={GRAVITY_HINT} />
                 <Select
                   value={params.gravity}
                   onValueChange={(v) => setParams((p) => ({ ...p, gravity: v }))}

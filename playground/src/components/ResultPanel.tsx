@@ -46,7 +46,7 @@ export function ResultPanel({ outcomes, loading }: Props) {
         )}
 
         {anyRequest && (anyResult || anyError || loading) && (
-          <div className="grid gap-4 xl:grid-cols-2">
+          <div className="grid gap-4 lg:grid-cols-2">
             {outcomes.map((o) => (
               <ServiceCard key={o.label} outcome={o} loading={loading} />
             ))}

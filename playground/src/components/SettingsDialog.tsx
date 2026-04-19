@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Settings } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { Settings, Download, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -12,15 +12,26 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { DEFAULT_SETTINGS, useSettings, type AppSettings } from '@/lib/settings'
+import {
+  DEFAULT_SETTINGS,
+  parseSettingsJson,
+  settingsToJson,
+  useSettings,
+  type AppSettings,
+} from '@/lib/settings'
 
 export function SettingsDialog() {
   const { settings, replace } = useSettings()
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<AppSettings>(settings)
+  const [importError, setImportError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const onOpenChange = (next: boolean) => {
-    if (next) setDraft(settings)
+    if (next) {
+      setDraft(settings)
+      setImportError(null)
+    }
     setOpen(next)
   }
 
@@ -32,6 +43,38 @@ export function SettingsDialog() {
   const onReset = () => setDraft(DEFAULT_SETTINGS)
 
   const set = (patch: Partial<AppSettings>) => setDraft((d) => ({ ...d, ...patch }))
+
+  const onExport = () => {
+    const blob = new Blob([settingsToJson(draft)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    a.download = `imago-playground-settings-${stamp}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  const onImportClick = () => {
+    setImportError(null)
+    fileInputRef.current?.click()
+  }
+
+  const onImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    // Reset so selecting the same file again re-fires the change event.
+    e.target.value = ''
+    if (!file) return
+    try {
+      const text = await file.text()
+      setDraft(parseSettingsJson(text))
+      setImportError(null)
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : String(err))
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -131,11 +174,34 @@ export function SettingsDialog() {
           </section>
         </div>
 
-        <DialogFooter className="gap-2">
-          <Button variant="ghost" onClick={onReset}>
-            Reset
-          </Button>
-          <Button onClick={onSave}>Save</Button>
+        {importError && (
+          <p className="text-xs text-(--color-destructive)">Import failed: {importError}</p>
+        )}
+
+        <DialogFooter className="flex-wrap gap-2 sm:justify-between">
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={onImportClick}>
+              <Upload className="h-4 w-4" />
+              Import
+            </Button>
+            <Button variant="outline" size="sm" onClick={onExport}>
+              <Download className="h-4 w-4" />
+              Export
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              onChange={onImportFile}
+              className="hidden"
+            />
+          </div>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={onReset}>
+              Reset
+            </Button>
+            <Button onClick={onSave}>Save</Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

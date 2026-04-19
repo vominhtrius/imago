@@ -1,4 +1,5 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import { ResizeForm, CropForm, ConvertForm } from '@/components/FeatureForm'
 import { SettingsProvider, s3IsConfigured, useSettings } from '@/lib/settings'
@@ -8,7 +9,7 @@ function Header() {
   const { settings } = useSettings()
   return (
     <header className="border-b border-(--color-border) bg-(--color-card)">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
+      <div className="mx-auto flex max-w-[1440px] items-center justify-between px-6 py-3">
         <div className="flex items-center gap-2">
           <ImageIcon className="h-5 w-5" />
           <h1 className="text-lg font-semibold">imago playground</h1>
@@ -36,7 +37,7 @@ function Shell() {
   return (
     <div className="min-h-full flex flex-col">
       <Header />
-      <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-6">
+      <main className="mx-auto w-full max-w-[1440px] flex-1 px-6 py-6">
         <Tabs defaultValue="resize">
           <TabsList>
             <TabsTrigger value="resize">Resize</TabsTrigger>
@@ -65,7 +66,9 @@ function Shell() {
 export default function App() {
   return (
     <SettingsProvider>
-      <Shell />
+      <TooltipProvider delayDuration={200}>
+        <Shell />
+      </TooltipProvider>
     </SettingsProvider>
   )
 }
