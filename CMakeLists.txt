@@ -25,9 +25,11 @@ set(SOURCES
     src/usecases/ResizeUseCase.cpp
     src/usecases/CropUseCase.cpp
     src/usecases/ConvertUseCase.cpp
+    src/usecases/UploadUseCase.cpp
     src/controllers/ResizeController.cpp
     src/controllers/CropController.cpp
     src/controllers/ConvertController.cpp
+    src/controllers/UploadController.cpp
     src/infrastructure/s3/S3Client.cpp
     src/infrastructure/vips/VipsImage.cpp
     src/infrastructure/vips/ImageProcessor.cpp

@@ -1,5 +1,7 @@
 #pragma once
+#include <cstdint>
 #include <string>
+#include <vector>
 
 enum class FitMode    { Fit, Fill, FillDown, Force };
 enum class Gravity {
@@ -46,3 +48,20 @@ struct ConvertRequest {
     int          quality = -1;
     OutputFormat output  = OutputFormat::Auto;
 };
+
+// Upload (ingest) request. `data` is the raw, as-received body — binary or
+// extracted from multipart. The ingest pipeline sniffs magic bytes, rejects
+// forged content types, strips metadata, optionally normalizes HEIC, and
+// optionally pre-resizes to cap long-edge dimension.
+struct UploadRequest {
+    std::vector<uint8_t> data;
+    std::string          bucket;
+    std::string          key_prefix;        // destination prefix, inc. trailing "/"
+    std::string          declared_content_type;  // from request header; advisory only
+    long long            max_bytes           = 0;  // 0 = rely on global cap
+    int                  pre_resize_max_dim  = 0;  // 0 = keep source dimensions
+    bool                 normalize_heic      = true;
+    OutputFormat         override_output     = OutputFormat::Auto; // Auto = keep source format
+    int                  quality             = -1; // -1 = format default
+};
+

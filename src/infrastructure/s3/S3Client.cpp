@@ -1,9 +1,13 @@
 #include "infrastructure/s3/S3Client.hpp"
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/utils/threading/PooledThreadExecutor.h>
+#include <aws/core/utils/stream/PreallocatedStreamBuf.h>
 #include <aws/s3/model/GetObjectRequest.h>
+#include <aws/s3/model/PutObjectRequest.h>
 #include <aws/s3/S3Errors.h>
 #include <trantor/net/EventLoop.h>
+#include <memory>
+#include <sstream>
 #include <vector>
 
 S3ClientWrapper::S3ClientWrapper(const AppConfig& cfg)
@@ -170,4 +174,95 @@ drogon::Task<std::vector<uint8_t>> S3ClientWrapper::download(
     };
 
     co_return co_await S3Awaiter{client_.get(), bucket, key, loop, state, guard, max_bytes};
+}
+
+drogon::Task<void> S3ClientWrapper::upload(
+    const std::string& bucket, const std::string& key,
+    std::vector<uint8_t> data, const std::string& content_type)
+{
+    auto* loop = trantor::EventLoop::getEventLoopOfCurrentThread();
+
+    struct PutState {
+        std::vector<uint8_t> data;   // pinned until the async call completes
+        std::string          error_message;
+        int                  error_http_code = 500;
+    };
+    struct CancelGuard {
+        std::mutex m;
+        bool       alive = true;
+    };
+    auto state = std::make_shared<PutState>();
+    state->data = std::move(data);
+    auto guard = std::make_shared<CancelGuard>();
+
+    struct PutAwaiter {
+        Aws::S3::S3Client*           client;
+        std::string                  bucket;
+        std::string                  key;
+        std::string                  content_type;
+        trantor::EventLoop*          loop;
+        std::shared_ptr<PutState>    state;
+        std::shared_ptr<CancelGuard> guard;
+
+        ~PutAwaiter() {
+            std::lock_guard lk(guard->m);
+            guard->alive = false;
+        }
+
+        bool await_ready() { return false; }
+
+        void await_suspend(std::coroutine_handle<> h) {
+            Aws::S3::Model::PutObjectRequest req;
+            req.SetBucket(bucket);
+            req.SetKey(key);
+            if (!content_type.empty()) req.SetContentType(content_type);
+
+            // PreallocatedStreamBuf wraps our vector bytes without copy.
+            // The SDK drains the stream before the callback fires, so pinning
+            // `state->data` through the callback keeps the buffer alive.
+            auto streambuf = Aws::MakeShared<Aws::Utils::Stream::PreallocatedStreamBuf>(
+                "imago-upload",
+                state->data.data(),
+                state->data.size());
+            auto body = Aws::MakeShared<Aws::IOStream>("imago-upload", streambuf.get());
+            req.SetBody(body);
+
+            client->PutObjectAsync(req,
+                [state = state, guard = guard, loop = loop, h](
+                    const Aws::S3::S3Client*,
+                    const Aws::S3::Model::PutObjectRequest&,
+                    const Aws::S3::Model::PutObjectOutcome& outcome,
+                    const std::shared_ptr<const Aws::Client::AsyncCallerContext>&)
+                {
+                    if (!outcome.IsSuccess()) {
+                        const auto& err = outcome.GetError();
+                        state->error_message = err.GetMessage();
+                        auto code = err.GetErrorType();
+                        if (code == Aws::S3::S3Errors::ACCESS_DENIED ||
+                            code == Aws::S3::S3Errors::INVALID_ACCESS_KEY_ID ||
+                            code == Aws::S3::S3Errors::SIGNATURE_DOES_NOT_MATCH)
+                            state->error_http_code = 502;
+                        else if (code == Aws::S3::S3Errors::NO_SUCH_BUCKET)
+                            state->error_http_code = 404;
+                    }
+
+                    auto resume_if_alive = [guard, h]() mutable {
+                        std::unique_lock lk(guard->m);
+                        if (!guard->alive) return;
+                        lk.unlock();
+                        h.resume();
+                    };
+                    if (loop) loop->queueInLoop(std::move(resume_if_alive));
+                    else      resume_if_alive();
+                });
+        }
+
+        void await_resume() {
+            if (!state->error_message.empty())
+                throw HttpException(state->error_http_code, state->error_message);
+        }
+    };
+
+    co_await PutAwaiter{client_.get(), bucket, key, content_type, loop, state, guard};
+    co_return;
 }

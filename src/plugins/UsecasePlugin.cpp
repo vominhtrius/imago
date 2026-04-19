@@ -10,6 +10,7 @@ void UsecasePlugin::initAndStart(const Json::Value&) {
     resize_  = std::make_unique<ResizeUseCase>(&s3p->s3(), &vipsp->processor());
     crop_    = std::make_unique<CropUseCase>(&s3p->s3(), &vipsp->processor());
     convert_ = std::make_unique<ConvertUseCase>(&s3p->s3(), &vipsp->processor());
+    upload_  = std::make_unique<UploadUseCase>(&s3p->s3(), &vipsp->processor());
 }
 
 void UsecasePlugin::shutdown() {}

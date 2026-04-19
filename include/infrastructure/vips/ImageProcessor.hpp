@@ -3,6 +3,7 @@
 #include "models/ImageRequest.hpp"
 #include <drogon/drogon.h>
 #include <functional>
+#include <string>
 #include <vector>
 #include <cstdint>
 #include <thread>
@@ -31,6 +32,21 @@ public:
     drogon::Task<std::string> convert(
         std::vector<uint8_t> buf, OutputFormat fmt, int quality = -1);
 
+    // --- ingest (upload path) ------------------------------------------
+    struct IngestOptions {
+        OutputFormat override_output    = OutputFormat::Auto;  // Auto = follow source / HEIC rule
+        bool         normalize_heic     = true;   // HEIC/HEIF → JPEG on write
+        int          pre_resize_max_dim = 0;      // long-edge px; 0 = no resize
+        int          quality            = -1;     // -1 = format default
+    };
+    struct IngestResult {
+        std::string  bytes;      // re-encoded body (metadata stripped)
+        OutputFormat output  = OutputFormat::JPEG;
+        int          width   = 0;
+        int          height  = 0;
+    };
+    drogon::Task<IngestResult> ingest(std::vector<uint8_t> buf, IngestOptions opts);
+
 private:
     drogon::Task<std::string> submit(
         std::vector<uint8_t> buf,
@@ -49,6 +65,10 @@ private:
 
     static std::string convert_sync(
         const std::vector<uint8_t>& buf, OutputFormat fmt, int quality,
+        int max_src_resolution_mp);
+
+    static IngestResult ingest_sync(
+        const std::vector<uint8_t>& buf, IngestOptions opts,
         int max_src_resolution_mp);
 
     void worker_loop();
