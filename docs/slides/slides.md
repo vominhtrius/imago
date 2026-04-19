@@ -59,6 +59,29 @@ Ngắn gọn, tránh dẫn nhập dài dòng. Audience là CTO và Engineering D
 layout: default
 ---
 
+# Agenda
+
+1. **The problem** — why every team keeps rebuilding the image path
+2. **Scope & architecture** — what "one image platform" means
+3. **Options on the market** — imgproxy, thumbor, weserv, and the C++ port
+4. **Benchmark** — same hardware, same libvips, head-to-head
+5. **Recommendation & decision** — rollout, risks, what we need from you
+6. **Demo** — the two services running side by side
+
+<div class="pt-10 opacity-70 text-sm">
+  ~15 minutes. Questions welcome throughout.
+</div>
+
+<!--
+Đặt lại expectation cho audience: deck có cấu trúc tường minh, biết trước khi nào quyết định sẽ được xin.
+
+Không đọc từng dòng. 15 giây.
+-->
+
+---
+layout: default
+---
+
 # Why we're here
 
 Today, every product rebuilds the image path:
@@ -378,22 +401,42 @@ Dòng convert có gain lớn nhất vì WebP encode là CPU-bound — chỗ mà 
 
 ---
 
-# Throughput & speedup
+# Throughput
 
-<div class="grid grid-cols-2 gap-2">
-
-![Throughput and latency](/charts/throughput_latency_9f04418_20260419_002902.png)
-
-![Speedup](/charts/speedup_9f04418_20260419_002902.png)
-
+<div class="flex justify-center">
+  <img src="/charts/throughput_latency_9f04418_20260419_002902.png"
+       alt="Throughput and latency per scenario"
+       class="w-[90%] max-h-[70vh] object-contain" />
 </div>
 
 <!--
-Để chart tự nói. "Bên trái là requests per second. Bên phải là speedup — imago so với imgproxy."
+"Requests per second trên bốn scenario. Bar cao hơn = tốt hơn."
 
-Không kể từng cột. Chỉ vào cột convert: "3× ở convert là vì WebP encode là scenario nặng CPU nhất — chỗ mà FFI tax của imgproxy bị phạt nặng nhất."
+Không kể từng cột. Chỉ vào cột convert: "imago gấp 3× ở đó vì WebP encode là workload nặng CPU nhất — chỗ FFI tax của imgproxy bị phạt nặng nhất."
 
-20 giây.
+15 giây.
+-->
+
+---
+
+# Speedup
+
+<div class="flex justify-center">
+  <img src="/charts/speedup_9f04418_20260419_002902.png"
+       alt="Speedup vs imgproxy"
+       class="w-[90%] max-h-[70vh] object-contain" />
+</div>
+
+<div class="mt-4 text-center text-lg">
+  imago vs imgproxy — <strong>2.19–3.07×</strong> across all scenarios.
+</div>
+
+<!--
+Chart này để tự nói. Không đọc từng số.
+
+"Baseline 1.0× là imgproxy. Cột cao hơn 1 là imago thắng. Convert là đỉnh vì CPU-bound, resize/crop hơn 2× đều đặn."
+
+15 giây.
 -->
 
 ---
@@ -666,38 +709,56 @@ CVE: exposure giống hệt imgproxy. Cả hai đều gọi libvips. Patch cũng
 -->
 
 ---
-layout: center
-class: text-center
+layout: default
 ---
 
-# Decision requested
+# Demo — playground
 
-<div class="text-2xl pt-6 leading-relaxed">
+Same source, same parameters, two services. Side-by-side panels show rendered output, server timing, bytes on the wire, and EXIF parity.
 
-Approve <strong>imago</strong> as the company-wide image processing platform and authorise Phase 1 pilot deployment.
+- Pick an S3 key or upload a file
+- Choose resize / crop / convert · tweak w, h, fit, gravity, output, quality
+- Request fires against `imago` and `imgproxy` in parallel
+- Compare: timing bars, byte counts, stripped EXIF, decoded dimensions
 
-</div>
-
-<div class="pt-10 opacity-70 text-sm">
-  Fallback: Option 1 (forked imgproxy) if senior C++ owner cannot be staffed.
+<div class="mt-6 text-sm opacity-80">
+  Running locally against the same docker stack the benchmark ran on — <code>http://localhost:5173</code>
 </div>
 
 <!--
-Slide cuối. Một câu. Xin quyết định.
+Demo ngắn, 2 phút. Kịch bản:
 
-Không bình luận thêm. Không summarize lại. Mình đã xin quyết định; giờ đợi.
+1. Mở playground, dán S3 key của ảnh có EXIF GPS (IMG_TEST.JPG).
+2. Resize tab → w=400, fit=fill → Run. Hai panel hiện: imago ~20ms server time, imgproxy ~40-50ms, bytes parity (sau fix jpeg-thumbnail-data).
+3. Mở EXIF panel: cả hai đều stripped GPS, imago giữ Orientation chuẩn.
+4. Nếu còn thời gian: Crop tab với gravity=sm để show smart-crop thay đổi output.
 
-Nếu trả lời "để xem lại" — hỏi cụ thể cần resolve gì. Thường là câu staffing. Offer sẽ quay lại với tên người owner cụ thể.
+Không demo Convert — 1s/request cho imgproxy sẽ làm audience sốt ruột, và đã có trên bảng benchmark rồi.
 
-Nếu trả lời "go" — kick-off Phase 1: chọn pilot surface, setup shadow-mode harness, định nghĩa review tuần 7.
+Không mở Settings, không show code, không scroll logs.
 -->
 
 ---
 layout: end
 ---
 
-# Questions?
+# Q&A
 
 <div class="pt-6 opacity-70">
   Full proposal: <code>docs/solution-proposal-image-service-v2.md</code>
 </div>
+
+<!--
+Slide kết. Mở sàn cho câu hỏi.
+
+Câu thường gặp và hướng trả lời ngắn:
+
+- "Ai sẽ own service?" — chuẩn bị sẵn một tên senior C++ trong đầu; nếu chưa có, fallback là Option 1.
+- "Rollback thế nào?" — CloudFront behavior routing; đổi rule vài phút là xong.
+- "Xoá ảnh thì sao?" — tombstone key, request mới trả 404, CDN hit cũ hết hạn theo TTL.
+- "CVE libvips?" — exposure giống hệt imgproxy; bump base image và redeploy.
+- "Chạy song song cả hai như insurance?" — được, nhưng là chi phí thêm, không phải hedge miễn phí.
+
+Nếu cần quyết định ngay: "Với staffing đã confirm, em đề nghị approve Phase 1 pilot hôm nay."
+-->
+
