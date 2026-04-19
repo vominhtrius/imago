@@ -168,6 +168,7 @@ export function SettingsDialog() {
                 type="checkbox"
                 checked={draft.s3ForcePathStyle}
                 onChange={(e) => set({ s3ForcePathStyle: e.target.checked })}
+                style={{ accentColor: 'var(--color-primary)' }}
               />
               Force path-style URLs (required for MinIO and most non-AWS providers)
             </label>

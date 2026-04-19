@@ -5,6 +5,20 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>imago playground</title>
+    <script>
+      // Apply theme before React hydrates to prevent a light→dark flash.
+      // Keep in sync with src/lib/theme.ts STORAGE_KEY / resolution logic.
+      (function () {
+        try {
+          var saved = localStorage.getItem('imago-playground.theme.v1');
+          var pref = saved === 'light' || saved === 'dark' ? saved : null;
+          var dark = pref
+            ? pref === 'dark'
+            : window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (_) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -140,7 +140,7 @@ function ModeTab({
       className={
         'inline-flex items-center gap-1 rounded px-3 py-1 transition-colors ' +
         (active
-          ? 'bg-(--color-background) text-(--color-foreground) shadow'
+          ? 'bg-(--color-primary)/15 text-(--color-primary) shadow-sm font-medium'
           : 'text-(--color-muted-foreground) hover:text-(--color-foreground)')
       }
     >

@@ -1,8 +1,10 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { SettingsDialog } from '@/components/SettingsDialog'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { ResizeForm, CropForm, ConvertForm } from '@/components/FeatureForm'
 import { SettingsProvider, s3IsConfigured, useSettings } from '@/lib/settings'
+import { ThemeProvider } from '@/lib/theme'
 import { ImageIcon } from 'lucide-react'
 
 function Header() {
@@ -27,7 +29,10 @@ function Header() {
             </span>
           )}
         </div>
-        <SettingsDialog />
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <SettingsDialog />
+        </div>
       </div>
     </header>
   )
@@ -65,10 +70,12 @@ function Shell() {
 
 export default function App() {
   return (
-    <SettingsProvider>
-      <TooltipProvider delayDuration={200}>
-        <Shell />
-      </TooltipProvider>
-    </SettingsProvider>
+    <ThemeProvider>
+      <SettingsProvider>
+        <TooltipProvider delayDuration={200}>
+          <Shell />
+        </TooltipProvider>
+      </SettingsProvider>
+    </ThemeProvider>
   )
 }
