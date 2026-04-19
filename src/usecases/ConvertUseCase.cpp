@@ -8,7 +8,8 @@ ConvertUseCase::ConvertUseCase(S3ClientWrapper* s3, ImageProcessor* processor)
     : s3_(s3), processor_(processor) {}
 
 drogon::Task<drogon::HttpResponsePtr> ConvertUseCase::execute(ConvertRequest req) {
-    auto data   = co_await s3_->download(req.bucket, req.key);
+    auto data = co_await s3_->download(req.bucket, req.key);
+    req.output = resolve_output_format(data, req.output);
     auto output = co_await processor_->convert(std::move(data), req.output, req.quality);
 
     auto resp = drogon::HttpResponse::newHttpResponse();

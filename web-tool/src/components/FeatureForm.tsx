@@ -89,7 +89,27 @@ export function FeatureForm({ operation, title, description, showResize, showCro
   const [loading, setLoading] = useState(false)
 
   const resolvedBucket = source.bucket || settings.s3Bucket
-  const canSubmit = Boolean(resolvedBucket && source.key && !loading)
+
+  const wNum = params.w === '' ? 0 : Number(params.w)
+  const hNum = params.h === '' ? 0 : Number(params.h)
+  // Resize needs at least one dimension; crop needs both (otherwise the crop
+  // window is undefined). Convert ignores w/h entirely.
+  const dimsOk =
+    operation === 'convert'
+      ? true
+      : operation === 'crop'
+        ? wNum > 0 && hNum > 0
+        : wNum > 0 || hNum > 0
+
+  const missingReason = !resolvedBucket || !source.key
+    ? 'Provide a bucket and object key (or upload a file).'
+    : !dimsOk
+      ? operation === 'crop'
+        ? 'Both width and height are required for crop.'
+        : 'Provide at least one of width or height (use Convert to only transcode).'
+      : ''
+
+  const canSubmit = Boolean(resolvedBucket && source.key && dimsOk && !loading)
 
   const paramPayload = (): Record<string, unknown> => {
     const p: Record<string, unknown> = {}
@@ -310,10 +330,8 @@ export function FeatureForm({ operation, title, description, showResize, showCro
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
             Run {operation}
           </Button>
-          {!canSubmit && !loading && (
-            <p className="text-xs text-(--color-muted-foreground)">
-              Provide a bucket and object key (or upload a file) to enable the request.
-            </p>
+          {!canSubmit && !loading && missingReason && (
+            <p className="text-xs text-(--color-muted-foreground)">{missingReason}</p>
           )}
         </CardContent>
       </Card>

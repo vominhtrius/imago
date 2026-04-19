@@ -227,8 +227,14 @@ function TimingBar({
   serverMs: number | null
   totalMs: number
 }) {
+  // Services that don't emit Server-Timing (e.g. imgproxy) render the pills
+  // with em-dashes — keeps the card shape identical to imago so the two
+  // panels line up side-by-side.
+  const hasServer = serverMs !== null
   const server = serverMs ?? 0
-  const network = Math.max(0, totalMs - server)
+  const network = hasServer ? Math.max(0, totalMs - server) : null
+  const share = hasServer && totalMs > 0 ? (server / totalMs) * 100 : null
+
   return (
     <div className="grid gap-2 rounded-md border border-(--color-border) bg-(--color-muted)/50 p-2">
       <div className="flex items-center justify-between">
@@ -242,39 +248,41 @@ function TimingBar({
           </span>
         </span>
       </div>
-      {serverMs !== null && (
-        <>
-          <div className="grid grid-cols-3 gap-1.5 text-[11px]">
-            <Pill
-              icon={<Server className="h-3 w-3" />}
-              label="Server"
-              value={`${server.toFixed(1)} ms`}
-              hint="processing"
-            />
-            <Pill
-              icon={<Clock className="h-3 w-3" />}
-              label="Network"
-              value={`${network.toFixed(1)} ms`}
-              hint="transit + decode"
-            />
-            <Pill
-              label="Share"
-              value={`${((server / totalMs) * 100).toFixed(0)}%`}
-              hint="server / total"
-            />
-          </div>
+      <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+        <Pill
+          icon={<Server className="h-3 w-3" />}
+          label="Server"
+          value={hasServer ? `${server.toFixed(1)} ms` : '—'}
+          hint={hasServer ? 'processing' : 'Server-Timing header not emitted'}
+        />
+        <Pill
+          icon={<Clock className="h-3 w-3" />}
+          label="Network"
+          value={network !== null ? `${network.toFixed(1)} ms` : '—'}
+          hint={network !== null ? 'transit + decode' : 'requires Server-Timing'}
+        />
+        <Pill
+          label="Share"
+          value={share !== null ? `${share.toFixed(0)}%` : '—'}
+          hint={share !== null ? 'server / total' : 'requires Server-Timing'}
+        />
+      </div>
+      <div
+        className="flex h-1 overflow-hidden rounded-full bg-(--color-border)"
+        role="img"
+        aria-label={
+          hasServer
+            ? `server ${server.toFixed(1)}ms of ${totalMs.toFixed(1)}ms total`
+            : `total ${totalMs.toFixed(1)}ms (no server timing)`
+        }
+      >
+        {share !== null && (
           <div
-            className="flex h-1 overflow-hidden rounded-full bg-(--color-border)"
-            role="img"
-            aria-label={`server ${server.toFixed(1)}ms of ${totalMs.toFixed(1)}ms total`}
-          >
-            <div
-              className="bg-(--color-primary)"
-              style={{ width: `${Math.min(100, (server / totalMs) * 100)}%` }}
-            />
-          </div>
-        </>
-      )}
+            className="bg-(--color-primary)"
+            style={{ width: `${Math.min(100, share)}%` }}
+          />
+        )}
+      </div>
     </div>
   )
 }

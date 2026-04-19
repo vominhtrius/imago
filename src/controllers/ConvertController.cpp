@@ -17,7 +17,7 @@ drogon::Task<drogon::HttpResponsePtr> ConvertController::handle(
     img_req.key    = std::move(key);
 
     if (!parse_output(req->getParameter("output"), img_req.output))
-        co_return bad_request("invalid 'output' (webp|jpeg|png|avif)");
+        co_return bad_request("invalid 'output' (auto|webp|jpeg|png|avif)");
     if (!parse_int(req->getParameter("quality"), img_req.quality))
         co_return bad_request("invalid 'quality' (1-100)");
 

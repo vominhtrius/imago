@@ -8,7 +8,10 @@ ResizeUseCase::ResizeUseCase(S3ClientWrapper* s3, ImageProcessor* processor)
     : s3_(s3), processor_(processor) {}
 
 drogon::Task<drogon::HttpResponsePtr> ResizeUseCase::execute(ResizeRequest req) {
-    auto data   = co_await s3_->download(req.bucket, req.key);
+    auto data = co_await s3_->download(req.bucket, req.key);
+    // Resolve "same as source" once the bytes are in hand; concrete format
+    // drives both the encoder and the Content-Type header.
+    req.output  = resolve_output_format(data, req.output);
     auto output = co_await processor_->resize(
         std::move(data), req.w, req.h, req.fit, req.output, req.quality);
 

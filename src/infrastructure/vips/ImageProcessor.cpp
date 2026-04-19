@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 static void vips_worker_thread_exit() { vips_thread_shutdown(); }
 
@@ -187,6 +188,81 @@ static void gravity_offset(Gravity g, double fp_x, double fp_y,
     }
 }
 
+// --- metadata scrub (imgproxy parity) ---------------------------------------
+// imgproxy's default: strip EXIF/IPTC/XMP, keep ICC, keep a whitelist of
+// benign/useful EXIF fields (copyright, orientation, resolution, color space).
+// libvips' `keep=VIPS_FOREIGN_KEEP_EXIF | KEEP_ICC` preserves the full EXIF
+// block; we mutate the image metadata *before* save to drop the rest.
+//
+// EXIF fields surface as `exif-ifd{N}-{Name}` where N is the IFD number:
+//   0 = main (camera, copyright, orientation)
+//   1 = thumbnail (always drop — we're emitting a transcode)
+//   2 = Exif subIFD (capture settings, DateTime, MakerNote — mostly drop)
+//   3 = GPS (always drop — privacy)
+
+static bool exif_suffix_whitelisted(std::string_view suffix) {
+    // Whitelist matches imgproxy's default carry-through set.
+    static constexpr std::string_view keep[] = {
+        "Copyright", "Artist",
+        "Orientation",
+        "XResolution", "YResolution", "ResolutionUnit",
+        "ColorSpace",
+        "PixelXDimension", "PixelYDimension",
+    };
+    for (auto w : keep) if (suffix == w) return true;
+    return false;
+}
+
+extern "C" {
+static void* collect_strip_field(VipsImage* /*img*/, const char* name,
+                                 GValue* /*value*/, void* user_data)
+{
+    auto* out = static_cast<std::vector<std::string>*>(user_data);
+    std::string_view sv{name};
+
+    // Drop entire blobs.
+    if (sv.starts_with("xmp-") || sv == "xmp-data") {
+        out->emplace_back(name); return nullptr;
+    }
+    if (sv.starts_with("iptc-") || sv == "iptc-data") {
+        out->emplace_back(name); return nullptr;
+    }
+
+    // EXIF: always drop thumbnail (ifd1) and GPS (ifd3) IFDs.
+    if (sv.starts_with("exif-ifd1-") || sv.starts_with("exif-ifd3-")) {
+        out->emplace_back(name); return nullptr;
+    }
+
+    // EXIF main (ifd0) and Exif subIFD (ifd2): keep only whitelisted suffixes.
+    auto check_ifd = [&](std::string_view prefix) {
+        if (!sv.starts_with(prefix)) return false;
+        std::string_view suffix = sv.substr(prefix.size());
+        // libvips suffixes sometimes carry a trailing type tag ("-Short");
+        // compare the head token only.
+        auto dash = suffix.find('-');
+        std::string_view head = dash == std::string_view::npos
+            ? suffix : suffix.substr(0, dash);
+        if (!exif_suffix_whitelisted(head)) out->emplace_back(name);
+        return true;
+    };
+    if (check_ifd("exif-ifd0-")) return nullptr;
+    if (check_ifd("exif-ifd2-")) return nullptr;
+
+    return nullptr;
+}
+} // extern "C"
+
+static void strip_sensitive_metadata(VipsImage* img) {
+    std::vector<std::string> to_remove;
+    vips_image_map(img, collect_strip_field, &to_remove);
+    for (const auto& name : to_remove) vips_image_remove(img, name.c_str());
+
+    // Belt-and-braces: remove the top-level XMP/IPTC blobs by their canonical
+    // vips metadata names in case the loader stored them under a distinct key.
+    vips_image_remove(img, VIPS_META_XMP_NAME);
+    vips_image_remove(img, VIPS_META_IPTC_NAME);
+}
+
 // --- save -------------------------------------------------------------------
 // Encoders write directly into the destination std::string via a custom
 // VipsTarget callback. Removes the intermediate g_malloc'd buffer that
@@ -226,32 +302,44 @@ std::string ImageProcessor::save_image(VipsImage* img, OutputFormat fmt, int qua
 
     int r = 0;
 
+    // Selective metadata preservation — imgproxy parity. Scrub first (drop
+    // XMP, IPTC, GPS, thumbnail IFD, and non-whitelisted EXIF fields) and
+    // then ask the encoder to carry forward EXIF + ICC only.
+    strip_sensitive_metadata(img);
+    const int keep = VIPS_FOREIGN_KEEP_EXIF | VIPS_FOREIGN_KEEP_ICC;
+
     // Per-format defaults match imgproxy (jpeg=80, webp=75, avif=65).
     // quality -1 means "use default".
     switch (fmt) {
+    case OutputFormat::Auto:
+        // Use cases resolve Auto → concrete before dispatching; anything
+        // reaching the encoder with Auto is a caller bug.
+        g_object_unref(target);
+        throw std::runtime_error(
+            "save_image: OutputFormat::Auto must be resolved before save");
     case OutputFormat::WebP: {
         int q = quality > 0 ? quality : 75;
         r = vips_webpsave_target(img, VIPS_TARGET(target),
                 "Q", q, "effort", 4,
                 "preset", VIPS_FOREIGN_WEBP_PRESET_DEFAULT,
-                "strip", TRUE, NULL);
+                "keep", keep, NULL);
         break;
     }
     case OutputFormat::JPEG: {
         int q = quality > 0 ? quality : 80;
         r = vips_jpegsave_target(img, VIPS_TARGET(target),
-                "Q", q, "optimize_coding", TRUE, "strip", TRUE, NULL);
+                "Q", q, "optimize_coding", TRUE, "keep", keep, NULL);
         break;
     }
     case OutputFormat::PNG:
         r = vips_pngsave_target(img, VIPS_TARGET(target),
-                "filter", VIPS_FOREIGN_PNG_FILTER_ALL, "strip", TRUE, NULL);
+                "filter", VIPS_FOREIGN_PNG_FILTER_ALL, "keep", keep, NULL);
         break;
     case OutputFormat::AVIF: {
         int q = quality > 0 ? quality : 65;
         r = vips_heifsave_target(img, VIPS_TARGET(target),
                 "compression", VIPS_FOREIGN_HEIF_COMPRESSION_AV1,
-                "Q", q, "effort", 5, "strip", TRUE, NULL);
+                "Q", q, "effort", 5, "keep", keep, NULL);
         break;
     }
     }

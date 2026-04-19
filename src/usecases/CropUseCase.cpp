@@ -8,7 +8,8 @@ CropUseCase::CropUseCase(S3ClientWrapper* s3, ImageProcessor* processor)
     : s3_(s3), processor_(processor) {}
 
 drogon::Task<drogon::HttpResponsePtr> CropUseCase::execute(CropRequest req) {
-    auto data   = co_await s3_->download(req.bucket, req.key);
+    auto data = co_await s3_->download(req.bucket, req.key);
+    req.output = resolve_output_format(data, req.output);
     auto output = co_await processor_->crop(
         std::move(data), req.w, req.h, req.gravity,
         req.fp_x, req.fp_y, req.output, req.quality);

@@ -13,7 +13,10 @@ enum class Gravity {
     // Focus point — fp_x, fp_y carried in CropRequest
     FocusPoint,
 };
-enum class OutputFormat { WebP, JPEG, PNG, AVIF };
+// `Auto` = "same as source". Use cases resolve it to a concrete format by
+// peeking the downloaded buffer's magic bytes before dispatching to the
+// processor. The encoder path never sees `Auto`.
+enum class OutputFormat { Auto, WebP, JPEG, PNG, AVIF };
 
 struct ResizeRequest {
     std::string  bucket;
@@ -22,7 +25,7 @@ struct ResizeRequest {
     int          h       = 0;
     int          quality = -1;   // -1 = use per-format default
     FitMode      fit     = FitMode::Fit;
-    OutputFormat output  = OutputFormat::WebP;
+    OutputFormat output  = OutputFormat::Auto;
 };
 
 struct CropRequest {
@@ -34,12 +37,12 @@ struct CropRequest {
     Gravity      gravity = Gravity::Center;
     double       fp_x    = 0.5;   // focus-point X in [0,1], used when gravity == FocusPoint
     double       fp_y    = 0.5;   // focus-point Y in [0,1]
-    OutputFormat output  = OutputFormat::WebP;
+    OutputFormat output  = OutputFormat::Auto;
 };
 
 struct ConvertRequest {
     std::string  bucket;
     std::string  key;
     int          quality = -1;
-    OutputFormat output  = OutputFormat::WebP;
+    OutputFormat output  = OutputFormat::Auto;
 };

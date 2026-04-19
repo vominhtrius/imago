@@ -138,7 +138,14 @@ export interface FetchOptions {
 
 export async function fetchImage(url: string, opts: FetchOptions): Promise<FetchResult> {
   const started = performance.now()
-  const res = await fetch(url, { method: 'GET' })
+  // `cache: 'no-store'` bans the browser HTTP cache from both reading and
+  // writing this response. Side-by-side timing only means something when
+  // every submit actually hits the service.
+  const res = await fetch(url, {
+    method: 'GET',
+    cache: 'no-store',
+    headers: { 'Cache-Control': 'no-cache' },
+  })
   const contentType = res.headers.get('content-type') ?? 'application/octet-stream'
 
   if (!res.ok) {

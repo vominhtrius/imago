@@ -28,7 +28,11 @@ services:
     depends_on:
       - minio
 
+  # ASan-instrumented build — opt-in via `--profile debug` so day-to-day
+  # `docker compose up` doesn't pay the second compile pass (which OOM-kills
+  # cc1plus on 8 GB Docker Desktops when run alongside the Release build).
   imago-debug:
+    profiles: [debug]
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -55,28 +59,34 @@ services:
       - minio
 
   # Enabled by the `web` profile so the web-tool can call imago and imgproxy
-  # side-by-side for comparison. Also pulled in by any other profile that
-  # explicitly lists it.
+  # side-by-side for comparison. Config mirrors benchmark/docker-compose.yml
+  # for apples-to-apples behaviour, plus IMGPROXY_TTL=0 so the browser and any
+  # intermediaries don't cache responses between runs.
   imgproxy:
     image: darthsim/imgproxy:latest
     profiles: [web, compare]
-    cpus: "4"
-    mem_limit: 4g
     ports:
-      - "${IMGPROXY_PORT:-8082}:8080"
+      - "${IMGPROXY_PORT:-8082}:80"
     environment:
-      - IMGPROXY_BIND=:8080
-      - IMGPROXY_MAX_CLIENTS=100
-      - IMGPROXY_CONCURRENCY=4
-      - IMGPROXY_CACHE_SIZE=0
-      - IMGPROXY_SO_REUSEPORT=true
-      - AWS_ACCESS_KEY_ID=minioadmin
-      - AWS_SECRET_ACCESS_KEY=minioadmin
-      - AWS_REGION=us-east-1
-      - IMGPROXY_USE_S3=true
-      - IMGPROXY_S3_ENDPOINT=http://minio:9000
+      IMGPROXY_BIND: ":80"
+      IMGPROXY_CONCURRENCY: ${WORKERS:-4}
+      IMGPROXY_MAX_SRC_RESOLUTION: "99"
+      IMGPROXY_USE_S3: "1"
+      IMGPROXY_S3_ENDPOINT: http://minio:9000
+      # Emit Cache-Control: max-age=0, public — prevents the browser from
+      # serving stale imgproxy responses while imago re-processes on every
+      # submit (would break side-by-side comparison).
+      IMGPROXY_TTL: "0"
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: us-east-1
     depends_on:
       - minio
+    healthcheck:
+      test: ["CMD", "imgproxy", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   minio:
     image: minio/minio:latest

@@ -26,7 +26,7 @@ drogon::Task<drogon::HttpResponsePtr> CropController::handle(
             "invalid 'gravity' "
             "(ce|no|so|ea|we|noea|nowe|soea|sowe|sm|entropy|fp:X:Y)");
     if (!parse_output(req->getParameter("output"), img_req.output))
-        co_return bad_request("invalid 'output' (webp|jpeg|png|avif)");
+        co_return bad_request("invalid 'output' (auto|webp|jpeg|png|avif)");
     if (!parse_int(req->getParameter("quality"), img_req.quality))
         co_return bad_request("invalid 'quality' (1-100)");
 

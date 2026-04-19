@@ -2,8 +2,10 @@
 #include "models/ImageRequest.hpp"
 #include <drogon/HttpResponse.h>
 #include <charconv>
+#include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 inline std::string content_type_for(OutputFormat fmt) {
     switch (fmt) {
@@ -11,8 +13,45 @@ inline std::string content_type_for(OutputFormat fmt) {
     case OutputFormat::JPEG: return "image/jpeg";
     case OutputFormat::PNG:  return "image/png";
     case OutputFormat::AVIF: return "image/avif";
+    case OutputFormat::Auto: break;   // caller must resolve before responding
     }
     return "application/octet-stream";
+}
+
+// Sniff the container format from the raw buffer's magic bytes. Mirrors the
+// imgproxy "preserve source format" default for `output=` unset. AVIF/HEIC
+// detection uses the ISO BMFF `ftyp` brand (bytes 4..12 of an ISO container).
+inline OutputFormat sniff_source_format(const std::vector<uint8_t>& buf) {
+    if (buf.size() < 12) return OutputFormat::WebP;    // fallback — tiny/unknown
+    const auto* p = buf.data();
+
+    // JPEG: FF D8 FF
+    if (p[0] == 0xFF && p[1] == 0xD8 && p[2] == 0xFF) return OutputFormat::JPEG;
+
+    // PNG: 89 50 4E 47 0D 0A 1A 0A
+    if (p[0] == 0x89 && p[1] == 'P' && p[2] == 'N' && p[3] == 'G') return OutputFormat::PNG;
+
+    // RIFF....WEBP
+    if (p[0] == 'R' && p[1] == 'I' && p[2] == 'F' && p[3] == 'F' &&
+        p[8] == 'W' && p[9] == 'E' && p[10] == 'B' && p[11] == 'P')
+        return OutputFormat::WebP;
+
+    // ISO BMFF (HEIC / AVIF): bytes 4..7 = "ftyp", brand at 8..11.
+    if (p[4] == 'f' && p[5] == 't' && p[6] == 'y' && p[7] == 'p') {
+        std::string_view brand{reinterpret_cast<const char*>(p + 8), 4};
+        if (brand == "avif" || brand == "avis") return OutputFormat::AVIF;
+        if (brand == "heic" || brand == "heix" || brand == "heim" ||
+            brand == "heis" || brand == "mif1" || brand == "msf1")
+            return OutputFormat::AVIF;   // transcode HEIC → AVIF (closest in our set)
+    }
+
+    return OutputFormat::WebP;   // unknown — fall back to WebP
+}
+
+// Resolve `Auto` against the source buffer; passes concrete formats through.
+inline OutputFormat resolve_output_format(const std::vector<uint8_t>& buf,
+                                          OutputFormat requested) {
+    return requested == OutputFormat::Auto ? sniff_source_format(buf) : requested;
 }
 
 inline drogon::HttpResponsePtr bad_request(const std::string& msg) {
@@ -97,7 +136,10 @@ inline bool parse_gravity(const std::string& s, Gravity& out,
 }
 
 inline bool parse_output(const std::string& s, OutputFormat& out) {
-    if (s.empty() || s == "webp")    { out = OutputFormat::WebP; return true; }
+    // Empty / "auto" → preserve source format; resolved in the use case
+    // after the buffer is downloaded (see resolve_output_format).
+    if (s.empty() || s == "auto")    { out = OutputFormat::Auto; return true; }
+    if (s == "webp")                 { out = OutputFormat::WebP; return true; }
     if (s == "jpeg" || s == "jpg")   { out = OutputFormat::JPEG; return true; }
     if (s == "png")                  { out = OutputFormat::PNG;  return true; }
     if (s == "avif")                 { out = OutputFormat::AVIF; return true; }
