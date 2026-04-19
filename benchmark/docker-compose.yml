@@ -1,0 +1,121 @@
+services:
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    # Host ports are published so the browser (playground profile) can upload
+    # directly via the S3 SDK. If a standalone MinIO is already running on the
+    # host, override via MINIO_PORT / MINIO_CONSOLE_PORT or set them to an
+    # unused port. Set them to an empty string to skip publishing entirely.
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  imgproxy:
+    image: darthsim/imgproxy:latest
+    environment:
+      IMGPROXY_BIND: ":80"
+      IMGPROXY_CONCURRENCY: ${WORKERS:-4}
+      IMGPROXY_MAX_SRC_RESOLUTION: "99"
+      IMGPROXY_USE_S3: "1"
+      IMGPROXY_S3_ENDPOINT: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: us-east-1
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "imgproxy", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  imago:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BUILD_TYPE: Release
+        JEMALLOC: ${JEMALLOC:-ON}
+        APT_MIRROR: ${APT_MIRROR:-http://ports.ubuntu.com/ubuntu-ports}
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: us-east-1
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_FORCE_PATH_STYLE: "true"
+      THREAD_POOL_SIZE: ${WORKERS:-4}
+      S3_EXECUTOR_THREADS: ${WORKERS:-4}
+      DROGON_WORKERS: ${WORKERS:-4}
+      IMAGO_PORT: "8080"
+      AWS_EC2_METADATA_DISABLED: "true"
+      # jemalloc: cap arenas to worker count (default 4×ncpu spawns 50+
+      # per-thread arenas, each holding its own dirty page pool — that drove
+      # RSS to ~1.4 GB in earlier runs while live heap was only ~54 MB).
+      # Aggressive decay returns pages to the OS quickly. stats_print dumps
+      # per-arena stats to stderr on clean shutdown.
+      MALLOC_CONF: "narenas:${WORKERS:-4},background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:0,stats_print:true"
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      # Any HTTP response (including 404) means the server is up.
+      test: ["CMD-SHELL", "curl -s http://localhost:8080/ -o /dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  # One-shot seeder: uploads ./dataset/ into MinIO.
+  # Run with: docker compose --profile seed run --rm seeder
+  seeder:
+    image: minio/mc:latest
+    profiles: [seed]
+    entrypoint: /bin/sh
+    command: >-
+      -c "mc alias set s http://minio:9000 minioadmin minioadmin &&
+          mc mb --ignore-existing s/${BUCKET:-divk2} &&
+          mc mirror --overwrite /dataset/ s/${BUCKET:-divk2}/"
+    volumes:
+      - ./dataset:/dataset:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  k6:
+    image: grafana/k6:latest
+    profiles: [bench]
+    volumes:
+      - .:/benchmark
+
+  # React playground for the imago API.
+  # Run with: docker compose --profile web up -d
+  # Then open http://localhost:${PLAYGROUND_PORT:-5173}
+  # nginx reverse-proxies /api/imago -> imago:8080 inside the compose network.
+  # The S3 SDK in the browser talks directly to MinIO on the published ports.
+  playground:
+    build:
+      context: ../playground
+      dockerfile: Dockerfile
+    profiles: [web]
+    ports:
+      - "${PLAYGROUND_PORT:-5173}:80"
+    depends_on:
+      imago:
+        condition: service_healthy
+    environment:
+      NGINX_ENTRYPOINT_QUIET_LOGS: "1"
+
+volumes:
+  minio-data:
