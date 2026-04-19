@@ -50,6 +50,16 @@ export function buildImagoUrl(
   return resolveFinal(settings.imagoBaseUrl, url)
 }
 
+// imago-only gravity tokens — imgproxy rejects these with 404 "Invalid URL"
+// so we skip the imgproxy leg entirely for those submits.
+const IMGPROXY_UNSUPPORTED_GRAVITIES = new Set(['entropy'])
+
+export interface ImgproxyUrlResult {
+  url: string | null
+  /** Present when `url` is null — human-readable reason for skipping. */
+  skipReason?: string
+}
+
 // imgproxy URL format (unsigned):
 //   resize  → /unsafe/rs:fit:W:H[/g:GRAVITY]/f:EXT[/q:Q]/plain/s3://BUCKET/KEY
 //   crop    → /unsafe/rs:fill:W:H[/g:GRAVITY]/f:EXT[/q:Q]/plain/s3://BUCKET/KEY
@@ -58,14 +68,26 @@ export function buildImagoUrl(
 // Accepts the same param shape as buildImagoUrl; fit/gravity values are
 // passed through verbatim (tokens already chosen to match imgproxy: fit,
 // fill, fill-down, force; ce, no, so, ea, we, noea, …, sm, fp:x:y).
+//
+// Returns `{ url: null, skipReason }` when the requested params can't be
+// expressed in imgproxy — the caller should skip its leg and render the
+// reason beside the imgproxy panel.
 export function buildImgproxyUrl(
   settings: AppSettings,
   op: Operation,
   bucket: string,
   key: string,
   params: Record<string, unknown>,
-): string {
+): ImgproxyUrlResult {
   const base = settings.imgproxyBaseUrl.replace(/\/+$/, '')
+
+  const gravity = typeof params.gravity === 'string' ? params.gravity : ''
+  if (op === 'crop' && IMGPROXY_UNSUPPORTED_GRAVITIES.has(gravity)) {
+    return {
+      url: null,
+      skipReason: `imgproxy has no "${gravity}" gravity — imago-only extension`,
+    }
+  }
 
   const ext = typeof params.output === 'string' && params.output ? String(params.output) : null
   const q = params.quality !== undefined && params.quality !== null && params.quality !== ''
@@ -83,8 +105,8 @@ export function buildImgproxyUrl(
         ? String(params.fit)
         : 'fit'
     segments.push(`rs:${fitMode}:${w}:${h}`)
-    if (op === 'crop' && typeof params.gravity === 'string' && params.gravity) {
-      segments.push(`g:${params.gravity}`)
+    if (op === 'crop' && gravity) {
+      segments.push(`g:${gravity}`)
     }
   }
 
@@ -97,7 +119,7 @@ export function buildImgproxyUrl(
 
   const path = `${base}/${segments.join('/')}`
   const url = new URL(path, window.location.origin)
-  return resolveFinal(settings.imgproxyBaseUrl, url)
+  return { url: resolveFinal(settings.imgproxyBaseUrl, url) }
 }
 
 export interface FetchResult {

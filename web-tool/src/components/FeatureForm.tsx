@@ -129,10 +129,12 @@ export function FeatureForm({ operation, title, description, showResize, showCro
     resolvedBucket && source.key
       ? buildImagoUrl(settings, operation, resolvedBucket, source.key, payload)
       : ''
-  const imgproxyPreviewUrl =
+  const imgproxyPreview =
     resolvedBucket && source.key && settings.imgproxyBaseUrl
       ? buildImgproxyUrl(settings, operation, resolvedBucket, source.key, payload)
-      : ''
+      : { url: null }
+  const imgproxyPreviewUrl = imgproxyPreview.url ?? ''
+  const imgproxySkipReason = imgproxyPreview.skipReason
 
   const onSubmit = async () => {
     if (!canSubmit) return
@@ -141,12 +143,16 @@ export function FeatureForm({ operation, title, description, showResize, showCro
     setImgproxy(EMPTY_SERVICE)
 
     const imagoUrl = buildImagoUrl(settings, operation, resolvedBucket, source.key, payload)
-    const imgproxyUrl = settings.imgproxyBaseUrl
+    const imgproxyBuild = settings.imgproxyBaseUrl
       ? buildImgproxyUrl(settings, operation, resolvedBucket, source.key, payload)
-      : ''
+      : { url: null }
 
     setImago((s) => ({ ...s, url: imagoUrl }))
-    if (imgproxyUrl) setImgproxy((s) => ({ ...s, url: imgproxyUrl }))
+    if (imgproxyBuild.url) {
+      setImgproxy((s) => ({ ...s, url: imgproxyBuild.url! }))
+    } else if (imgproxyBuild.skipReason) {
+      setImgproxy({ url: '', result: null, error: imgproxyBuild.skipReason })
+    }
 
     const jobs: Array<Promise<unknown>> = []
 
@@ -162,15 +168,16 @@ export function FeatureForm({ operation, title, description, showResize, showCro
         ),
     )
 
-    if (imgproxyUrl) {
+    if (imgproxyBuild.url) {
+      const url = imgproxyBuild.url
       jobs.push(
         // imgproxy emits Server-Timing as `imgproxy;dur=…`; fall back to
         // `total` which some builds emit.
-        fetchImage(imgproxyUrl, { label: 'imgproxy', timingNames: ['imgproxy', 'total'] })
-          .then((r) => setImgproxy({ url: imgproxyUrl, result: r, error: null }))
+        fetchImage(url, { label: 'imgproxy', timingNames: ['imgproxy', 'total'] })
+          .then((r) => setImgproxy({ url, result: r, error: null }))
           .catch((e: unknown) =>
             setImgproxy({
-              url: imgproxyUrl,
+              url,
               result: null,
               error: e instanceof Error ? e.message : String(e),
             }),
@@ -309,7 +316,7 @@ export function FeatureForm({ operation, title, description, showResize, showCro
             </div>
           </div>
 
-          {(imagoPreviewUrl || imgproxyPreviewUrl) && (
+          {(imagoPreviewUrl || imgproxyPreviewUrl || imgproxySkipReason) && (
             <div className="grid gap-1">
               {imagoPreviewUrl && (
                 <div className="rounded-md bg-(--color-muted) p-2 font-mono text-[11px] break-all">
@@ -321,6 +328,12 @@ export function FeatureForm({ operation, title, description, showResize, showCro
                 <div className="rounded-md bg-(--color-muted) p-2 font-mono text-[11px] break-all">
                   <span className="mr-2 font-semibold text-(--color-primary)">imgproxy</span>
                   {imgproxyPreviewUrl}
+                </div>
+              )}
+              {!imgproxyPreviewUrl && imgproxySkipReason && (
+                <div className="rounded-md border border-dashed border-(--color-border) bg-(--color-muted)/50 p-2 text-[11px] text-(--color-muted-foreground)">
+                  <span className="mr-2 font-semibold">imgproxy</span>
+                  skipped — {imgproxySkipReason}
                 </div>
               )}
             </div>

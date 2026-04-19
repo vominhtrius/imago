@@ -206,7 +206,6 @@ static bool exif_suffix_whitelisted(std::string_view suffix) {
         "Copyright", "Artist",
         "Orientation",
         "XResolution", "YResolution", "ResolutionUnit",
-        "ColorSpace",
         "PixelXDimension", "PixelYDimension",
     };
     for (auto w : keep) if (suffix == w) return true;
@@ -429,6 +428,23 @@ std::string ImageProcessor::crop_sync(
     //
     // Shrink-on-load has already brought the source close to the target size,
     // so `cover` here is typically in [0.5, 2.0].
+
+    // Apply EXIF orientation so the window is cut in *visual* coordinates,
+    // matching imgproxy. The fast path gets this for free from
+    // vips_thumbnail_image; the slow path has to opt in. vips_autorot also
+    // strips the orientation tag so the encoded output isn't rotated again by
+    // viewers.
+    {
+        VipsImage* raw_rot = nullptr;
+        int rr = vips_autorot(src.get(), &raw_rot, NULL);
+        if (rr != 0 || !raw_rot) {
+            std::string msg = vips_error_buffer();
+            vips_error_clear();
+            throw std::runtime_error("vips autorot failed: " + msg);
+        }
+        src = VipsImageGuard{raw_rot};
+    }
+
     const int src_w = vips_image_get_width(src.get());
     const int src_h = vips_image_get_height(src.get());
     if (src_w <= 0 || src_h <= 0)
