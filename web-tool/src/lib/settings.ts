@@ -2,6 +2,7 @@ import * as React from 'react'
 
 export interface AppSettings {
   imagoBaseUrl: string
+  imgproxyBaseUrl: string
   s3Endpoint: string
   s3Region: string
   s3AccessKeyId: string
@@ -13,14 +14,19 @@ export interface AppSettings {
 
 const STORAGE_KEY = 'imago-web-tool.settings.v1'
 
+// Defaults wired for the docker-compose `web` profile stack:
+//   nginx reverse-proxies /api/imago → imago:8080 and /api/imgproxy → imgproxy:8080.
+//   Browser talks directly to MinIO on the host port with the public dev creds
+//   baked into docker/docker-compose.yml.
 export const DEFAULT_SETTINGS: AppSettings = {
   imagoBaseUrl: '/api/imago',
-  s3Endpoint: '',
+  imgproxyBaseUrl: '/api/imgproxy',
+  s3Endpoint: 'http://localhost:9000',
   s3Region: 'us-east-1',
-  s3AccessKeyId: '',
-  s3SecretAccessKey: '',
+  s3AccessKeyId: 'minioadmin',
+  s3SecretAccessKey: 'minioadmin',
   s3Bucket: '',
-  s3ForcePathStyle: false,
+  s3ForcePathStyle: true,
   s3KeyPrefix: 'uploads/',
 }
 

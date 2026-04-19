@@ -28,6 +28,11 @@ function appendParams(url: URL, params: Record<string, unknown>) {
   }
 }
 
+function resolveFinal(base: string, url: URL): string {
+  const isAbsolute = /^https?:/i.test(base)
+  return isAbsolute ? url.toString() : `${url.pathname}${url.search}`
+}
+
 export function buildImagoUrl(
   settings: AppSettings,
   op: Operation,
@@ -37,10 +42,62 @@ export function buildImagoUrl(
 ): string {
   const base = settings.imagoBaseUrl.replace(/\/+$/, '')
   const safeKey = key.split('/').map(encodeURIComponent).join('/')
-  const url = new URL(`${base}/${op}/${encodeURIComponent(bucket)}/${safeKey}`, window.location.origin)
+  const url = new URL(
+    `${base}/${op}/${encodeURIComponent(bucket)}/${safeKey}`,
+    window.location.origin,
+  )
   appendParams(url, params)
-  const isAbsolute = /^https?:/i.test(settings.imagoBaseUrl)
-  return isAbsolute ? url.toString() : `${url.pathname}${url.search}`
+  return resolveFinal(settings.imagoBaseUrl, url)
+}
+
+// imgproxy URL format (unsigned):
+//   resize  → /unsafe/rs:fit:W:H[/g:GRAVITY]/f:EXT[/q:Q]/plain/s3://BUCKET/KEY
+//   crop    → /unsafe/rs:fill:W:H[/g:GRAVITY]/f:EXT[/q:Q]/plain/s3://BUCKET/KEY
+//   convert → /unsafe/f:EXT[/q:Q]/plain/s3://BUCKET/KEY
+//
+// Accepts the same param shape as buildImagoUrl; fit/gravity values are
+// passed through verbatim (tokens already chosen to match imgproxy: fit,
+// fill, fill-down, force; ce, no, so, ea, we, noea, …, sm, fp:x:y).
+export function buildImgproxyUrl(
+  settings: AppSettings,
+  op: Operation,
+  bucket: string,
+  key: string,
+  params: Record<string, unknown>,
+): string {
+  const base = settings.imgproxyBaseUrl.replace(/\/+$/, '')
+
+  const ext = typeof params.output === 'string' && params.output ? String(params.output) : null
+  const q = params.quality !== undefined && params.quality !== null && params.quality !== ''
+    ? Number(params.quality)
+    : null
+
+  const segments: string[] = ['unsafe']
+
+  if (op === 'resize' || op === 'crop') {
+    const w = params.w !== undefined && params.w !== '' ? Number(params.w) : 0
+    const h = params.h !== undefined && params.h !== '' ? Number(params.h) : 0
+    const fitMode = op === 'crop'
+      ? 'fill'
+      : typeof params.fit === 'string' && params.fit
+        ? String(params.fit)
+        : 'fit'
+    segments.push(`rs:${fitMode}:${w}:${h}`)
+    if (op === 'crop' && typeof params.gravity === 'string' && params.gravity) {
+      segments.push(`g:${params.gravity}`)
+    }
+  }
+
+  if (ext) segments.push(`f:${ext}`)
+  if (q !== null && Number.isFinite(q)) segments.push(`q:${q}`)
+
+  const safeKey = key.split('/').map(encodeURIComponent).join('/')
+  const plain = `plain/s3://${encodeURIComponent(bucket)}/${safeKey}`
+  segments.push(plain)
+
+  const path = `${base}/${segments.join('/')}`
+  const url = new URL(path, window.location.origin)
+  return resolveFinal(settings.imgproxyBaseUrl, url)
 }
 
 export interface FetchResult {
@@ -54,12 +111,13 @@ export interface FetchResult {
   status: number
 }
 
-// `Server-Timing: imago;dur=12.34, other;dur=…` — find the `imago` entry.
-function parseServerTiming(header: string | null): number | null {
+// `Server-Timing: <name>;dur=12.34, …` — find the first entry whose name
+// matches any of the provided candidates.
+function parseServerTiming(header: string | null, names: string[]): number | null {
   if (!header) return null
   for (const part of header.split(',')) {
     const [name, ...params] = part.trim().split(';')
-    if (name.trim() !== 'imago') continue
+    if (!names.includes(name.trim())) continue
     for (const p of params) {
       const [k, v] = p.trim().split('=')
       if (k === 'dur' && v) {
@@ -71,17 +129,27 @@ function parseServerTiming(header: string | null): number | null {
   return null
 }
 
-export async function fetchImago(url: string): Promise<FetchResult> {
+export interface FetchOptions {
+  /** Service label used in thrown errors and Server-Timing name lookup. */
+  label: string
+  /** Candidate Server-Timing names to parse. Defaults to [label]. */
+  timingNames?: string[]
+}
+
+export async function fetchImage(url: string, opts: FetchOptions): Promise<FetchResult> {
   const started = performance.now()
   const res = await fetch(url, { method: 'GET' })
   const contentType = res.headers.get('content-type') ?? 'application/octet-stream'
 
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new Error(`imago ${res.status}: ${text || res.statusText}`)
+    throw new Error(`${opts.label} ${res.status}: ${text || res.statusText}`)
   }
 
-  const serverMs = parseServerTiming(res.headers.get('server-timing'))
+  const serverMs = parseServerTiming(
+    res.headers.get('server-timing'),
+    opts.timingNames ?? [opts.label],
+  )
   const blob = await res.blob()
   const objectUrl = URL.createObjectURL(blob)
   return {
@@ -92,4 +160,9 @@ export async function fetchImago(url: string): Promise<FetchResult> {
     serverMs,
     status: res.status,
   }
+}
+
+// Back-compat helper for existing call sites.
+export function fetchImago(url: string): Promise<FetchResult> {
+  return fetchImage(url, { label: 'imago' })
 }

@@ -2,7 +2,17 @@
 #include <string>
 
 enum class FitMode    { Fit, Fill, FillDown, Force };
-enum class Gravity    { Attention, Entropy, Center };
+enum class Gravity {
+    // Cardinal / corner / center — imgproxy parity
+    Center,
+    North, South, East, West,
+    NorthEast, NorthWest, SouthEast, SouthWest,
+    // Content-aware
+    Smart,       // libvips ATTENTION (imgproxy "sm")
+    Entropy,     // libvips ENTROPY (imago extra, not in imgproxy)
+    // Focus point — fp_x, fp_y carried in CropRequest
+    FocusPoint,
+};
 enum class OutputFormat { WebP, JPEG, PNG, AVIF };
 
 struct ResizeRequest {
@@ -21,7 +31,9 @@ struct CropRequest {
     int          w       = 0;
     int          h       = 0;
     int          quality = -1;
-    Gravity      gravity = Gravity::Attention;
+    Gravity      gravity = Gravity::Center;
+    double       fp_x    = 0.5;   // focus-point X in [0,1], used when gravity == FocusPoint
+    double       fp_y    = 0.5;   // focus-point Y in [0,1]
     OutputFormat output  = OutputFormat::WebP;
 };
 

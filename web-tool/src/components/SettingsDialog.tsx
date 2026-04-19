@@ -52,12 +52,22 @@ export function SettingsDialog() {
 
         <div className="grid gap-4 py-2">
           <section className="grid gap-2">
-            <h4 className="text-sm font-semibold">imago server</h4>
-            <Field label="Base URL" hint="e.g. /api/imago (dev proxy) or http://localhost:8080">
+            <h4 className="text-sm font-semibold">Services</h4>
+            <Field label="imago base URL" hint="e.g. /api/imago (dev proxy) or http://localhost:8080">
               <Input
                 value={draft.imagoBaseUrl}
                 onChange={(e) => set({ imagoBaseUrl: e.target.value })}
                 placeholder="/api/imago"
+              />
+            </Field>
+            <Field
+              label="imgproxy base URL"
+              hint="Leave blank to disable side-by-side comparison. e.g. /api/imgproxy or http://localhost:8082"
+            >
+              <Input
+                value={draft.imgproxyBaseUrl}
+                onChange={(e) => set({ imgproxyBaseUrl: e.target.value })}
+                placeholder="/api/imgproxy"
               />
             </Field>
           </section>

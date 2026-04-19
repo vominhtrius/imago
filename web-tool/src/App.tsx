@@ -13,8 +13,13 @@ function Header() {
           <ImageIcon className="h-5 w-5" />
           <h1 className="text-lg font-semibold">imago web-tool</h1>
           <span className="rounded bg-(--color-muted) px-1.5 py-0.5 text-xs text-(--color-muted-foreground)">
-            {settings.imagoBaseUrl}
+            imago → {settings.imagoBaseUrl}
           </span>
+          {settings.imgproxyBaseUrl && (
+            <span className="rounded bg-(--color-muted) px-1.5 py-0.5 text-xs text-(--color-muted-foreground)">
+              imgproxy → {settings.imgproxyBaseUrl}
+            </span>
+          )}
           {!s3IsConfigured(settings) && (
             <span className="rounded bg-(--color-destructive)/10 px-1.5 py-0.5 text-xs text-(--color-destructive)">
               S3 not configured

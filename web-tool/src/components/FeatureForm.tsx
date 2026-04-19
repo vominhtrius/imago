@@ -13,14 +13,34 @@ import {
 import { NumberField } from '@/components/ui/slider-number'
 import { SourcePicker, type SourceState } from '@/components/SourcePicker'
 import { InputPreview } from '@/components/InputPreview'
-import { ResultPanel } from '@/components/ResultPanel'
-import { buildImagoUrl, fetchImago, type FetchResult, type Operation } from '@/lib/imago'
+import { ResultPanel, type ServiceOutcome } from '@/components/ResultPanel'
+import {
+  buildImagoUrl,
+  buildImgproxyUrl,
+  fetchImage,
+  type FetchResult,
+  type Operation,
+} from '@/lib/imago'
 import { useSettings } from '@/lib/settings'
 
 const DEFAULT = '__default__'
 const OUTPUTS = ['webp', 'jpeg', 'png', 'avif']
 const FITS = ['fit', 'fill', 'fill-down', 'force']
-const GRAVITIES = ['attention', 'entropy', 'center']
+// Tokens match imgproxy. imago accepts the same set (plus "entropy" as an
+// imago-only extra); imgproxy will error on "entropy".
+const GRAVITIES: Array<{ value: string; label: string }> = [
+  { value: 'ce', label: 'ce — center' },
+  { value: 'no', label: 'no — north' },
+  { value: 'so', label: 'so — south' },
+  { value: 'ea', label: 'ea — east' },
+  { value: 'we', label: 'we — west' },
+  { value: 'noea', label: 'noea — north-east' },
+  { value: 'nowe', label: 'nowe — north-west' },
+  { value: 'soea', label: 'soea — south-east' },
+  { value: 'sowe', label: 'sowe — south-west' },
+  { value: 'sm', label: 'sm — smart' },
+  { value: 'entropy', label: 'entropy (imago only)' },
+]
 
 interface ParamsState {
   w: number | ''
@@ -48,6 +68,14 @@ interface Props {
   showCrop: boolean
 }
 
+interface ServiceState {
+  result: FetchResult | null
+  error: string | null
+  url: string
+}
+
+const EMPTY_SERVICE: ServiceState = { result: null, error: null, url: '' }
+
 export function FeatureForm({ operation, title, description, showResize, showCrop }: Props) {
   const { settings } = useSettings()
   const [source, setSource] = useState<SourceState>({
@@ -56,10 +84,9 @@ export function FeatureForm({ operation, title, description, showResize, showCro
     pickedFile: null,
   })
   const [params, setParams] = useState<ParamsState>(DEFAULT_PARAMS)
-  const [result, setResult] = useState<FetchResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [imago, setImago] = useState<ServiceState>(EMPTY_SERVICE)
+  const [imgproxy, setImgproxy] = useState<ServiceState>(EMPTY_SERVICE)
   const [loading, setLoading] = useState(false)
-  const [lastUrl, setLastUrl] = useState('')
 
   const resolvedBucket = source.bucket || settings.s3Bucket
   const canSubmit = Boolean(resolvedBucket && source.key && !loading)
@@ -77,26 +104,74 @@ export function FeatureForm({ operation, title, description, showResize, showCro
     return p
   }
 
-  const previewUrl =
+  const payload = paramPayload()
+  const imagoPreviewUrl =
     resolvedBucket && source.key
-      ? buildImagoUrl(settings, operation, resolvedBucket, source.key, paramPayload())
+      ? buildImagoUrl(settings, operation, resolvedBucket, source.key, payload)
+      : ''
+  const imgproxyPreviewUrl =
+    resolvedBucket && source.key && settings.imgproxyBaseUrl
+      ? buildImgproxyUrl(settings, operation, resolvedBucket, source.key, payload)
       : ''
 
   const onSubmit = async () => {
     if (!canSubmit) return
     setLoading(true)
-    setError(null)
-    setResult(null)
-    const url = buildImagoUrl(settings, operation, resolvedBucket, source.key, paramPayload())
-    setLastUrl(url)
-    try {
-      const res = await fetchImago(url)
-      setResult(res)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLoading(false)
+    setImago(EMPTY_SERVICE)
+    setImgproxy(EMPTY_SERVICE)
+
+    const imagoUrl = buildImagoUrl(settings, operation, resolvedBucket, source.key, payload)
+    const imgproxyUrl = settings.imgproxyBaseUrl
+      ? buildImgproxyUrl(settings, operation, resolvedBucket, source.key, payload)
+      : ''
+
+    setImago((s) => ({ ...s, url: imagoUrl }))
+    if (imgproxyUrl) setImgproxy((s) => ({ ...s, url: imgproxyUrl }))
+
+    const jobs: Array<Promise<unknown>> = []
+
+    jobs.push(
+      fetchImage(imagoUrl, { label: 'imago' })
+        .then((r) => setImago({ url: imagoUrl, result: r, error: null }))
+        .catch((e: unknown) =>
+          setImago({
+            url: imagoUrl,
+            result: null,
+            error: e instanceof Error ? e.message : String(e),
+          }),
+        ),
+    )
+
+    if (imgproxyUrl) {
+      jobs.push(
+        // imgproxy emits Server-Timing as `imgproxy;dur=…`; fall back to
+        // `total` which some builds emit.
+        fetchImage(imgproxyUrl, { label: 'imgproxy', timingNames: ['imgproxy', 'total'] })
+          .then((r) => setImgproxy({ url: imgproxyUrl, result: r, error: null }))
+          .catch((e: unknown) =>
+            setImgproxy({
+              url: imgproxyUrl,
+              result: null,
+              error: e instanceof Error ? e.message : String(e),
+            }),
+          ),
+      )
     }
+
+    await Promise.all(jobs)
+    setLoading(false)
+  }
+
+  const outcomes: ServiceOutcome[] = [
+    { label: 'imago', requestUrl: imago.url, result: imago.result, error: imago.error },
+  ]
+  if (settings.imgproxyBaseUrl) {
+    outcomes.push({
+      label: 'imgproxy',
+      requestUrl: imgproxy.url,
+      result: imgproxy.result,
+      error: imgproxy.error,
+    })
   }
 
   return (
@@ -172,8 +247,8 @@ export function FeatureForm({ operation, title, description, showResize, showCro
                   <SelectContent>
                     <SelectItem value={DEFAULT}>default</SelectItem>
                     {GRAVITIES.map((g) => (
-                      <SelectItem key={g} value={g}>
-                        {g}
+                      <SelectItem key={g.value} value={g.value}>
+                        {g.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -214,9 +289,20 @@ export function FeatureForm({ operation, title, description, showResize, showCro
             </div>
           </div>
 
-          {previewUrl && (
-            <div className="rounded-md bg-(--color-muted) p-2 font-mono text-xs break-all">
-              {previewUrl}
+          {(imagoPreviewUrl || imgproxyPreviewUrl) && (
+            <div className="grid gap-1">
+              {imagoPreviewUrl && (
+                <div className="rounded-md bg-(--color-muted) p-2 font-mono text-[11px] break-all">
+                  <span className="mr-2 font-semibold text-(--color-primary)">imago</span>
+                  {imagoPreviewUrl}
+                </div>
+              )}
+              {imgproxyPreviewUrl && (
+                <div className="rounded-md bg-(--color-muted) p-2 font-mono text-[11px] break-all">
+                  <span className="mr-2 font-semibold text-(--color-primary)">imgproxy</span>
+                  {imgproxyPreviewUrl}
+                </div>
+              )}
             </div>
           )}
 
@@ -232,7 +318,7 @@ export function FeatureForm({ operation, title, description, showResize, showCro
         </CardContent>
       </Card>
 
-      <ResultPanel result={result} requestUrl={lastUrl} error={error} loading={loading} />
+      <ResultPanel outcomes={outcomes} loading={loading} />
     </div>
   )
 }

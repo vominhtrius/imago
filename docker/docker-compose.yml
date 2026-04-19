@@ -21,6 +21,10 @@ services:
       - DROGON_WORKERS=4
       - IMAGO_PORT=8080
       - AWS_EC2_METADATA_DISABLED=true
+      # jemalloc: cap arenas to worker count (default 4×ncpu spawns 50+
+      # per-thread arenas that pin dirty pages and balloon RSS without
+      # actually leaking). Aggressive decay returns pages to the OS quickly.
+      - MALLOC_CONF=narenas:4,background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:0,stats_print:true
     depends_on:
       - minio
 
@@ -50,13 +54,18 @@ services:
     depends_on:
       - minio
 
+  # Enabled by the `web` profile so the web-tool can call imago and imgproxy
+  # side-by-side for comparison. Also pulled in by any other profile that
+  # explicitly lists it.
   imgproxy:
     image: darthsim/imgproxy:latest
+    profiles: [web, compare]
     cpus: "4"
     mem_limit: 4g
     ports:
-      - "8082:8080"
+      - "${IMGPROXY_PORT:-8082}:8080"
     environment:
+      - IMGPROXY_BIND=:8080
       - IMGPROXY_MAX_CLIENTS=100
       - IMGPROXY_CONCURRENCY=4
       - IMGPROXY_CACHE_SIZE=0
@@ -98,6 +107,7 @@ services:
       - NGINX_ENTRYPOINT_QUIET_LOGS=1
     depends_on:
       - imago
+      - imgproxy
 
 volumes:
   minio-data:

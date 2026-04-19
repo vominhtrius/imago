@@ -20,8 +20,11 @@ drogon::Task<drogon::HttpResponsePtr> CropController::handle(
         co_return bad_request("'w' is required and must be > 0");
     if (!parse_int(req->getParameter("h"), img_req.h) || img_req.h <= 0)
         co_return bad_request("'h' is required and must be > 0");
-    if (!parse_gravity(req->getParameter("gravity"), img_req.gravity))
-        co_return bad_request("invalid 'gravity' (attention|entropy|center)");
+    if (!parse_gravity(req->getParameter("gravity"), img_req.gravity,
+                       img_req.fp_x, img_req.fp_y))
+        co_return bad_request(
+            "invalid 'gravity' "
+            "(ce|no|so|ea|we|noea|nowe|soea|sowe|sm|entropy|fp:X:Y)");
     if (!parse_output(req->getParameter("output"), img_req.output))
         co_return bad_request("invalid 'output' (webp|jpeg|png|avif)");
     if (!parse_int(req->getParameter("quality"), img_req.quality))

@@ -25,7 +25,8 @@ public:
         std::vector<uint8_t> buf, int w, int h, FitMode fit, OutputFormat fmt, int quality = -1);
 
     drogon::Task<std::string> crop(
-        std::vector<uint8_t> buf, int w, int h, Gravity gravity, OutputFormat fmt, int quality = -1);
+        std::vector<uint8_t> buf, int w, int h, Gravity gravity,
+        double fp_x, double fp_y, OutputFormat fmt, int quality = -1);
 
     drogon::Task<std::string> convert(
         std::vector<uint8_t> buf, OutputFormat fmt, int quality = -1);
@@ -42,7 +43,8 @@ private:
         int max_src_resolution_mp);
 
     static std::string crop_sync(
-        const std::vector<uint8_t>& buf, int w, int h, Gravity gravity, OutputFormat fmt, int quality,
+        const std::vector<uint8_t>& buf, int w, int h, Gravity gravity,
+        double fp_x, double fp_y, OutputFormat fmt, int quality,
         int max_src_resolution_mp);
 
     static std::string convert_sync(

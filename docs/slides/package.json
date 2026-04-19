@@ -1,0 +1,21 @@
+{
+  "name": "imago-solution-slides",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "slidev --open",
+    "build": "slidev build",
+    "export": "slidev export",
+    "export-pdf": "slidev export --format pdf --with-clicks --with-toc",
+    "export-notes": "slidev export-notes"
+  },
+  "dependencies": {
+    "@slidev/cli": "^52.14.2",
+    "@slidev/theme-default": "^0.25.0",
+    "@slidev/theme-seriph": "^0.25.0",
+    "markdown-it-prism": "^3.0.1",
+    "playwright-chromium": "^1.48.0",
+    "vue": "^3.5.0"
+  }
+}

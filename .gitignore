@@ -6,3 +6,5 @@ cmake-build-release
 .worktrees/
 node_modules/
 dist/
+
+web-tool/yarn.lock

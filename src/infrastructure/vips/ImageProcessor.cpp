@@ -131,11 +131,59 @@ static VipsInteresting map_resize_crop(FitMode fit) {
     return VIPS_INTERESTING_NONE;
 }
 
-static VipsInteresting map_gravity(Gravity g) {
+// Fast-path gravities: ones libvips can satisfy in a single
+// vips_thumbnail_image call via its `crop` (VipsInteresting) parameter.
+// Everything else needs the cover-scale + extract_area slow path because
+// VipsInteresting has no directional (N/S/E/W/corner) or focus-point modes.
+static bool is_fast_path_gravity(Gravity g) {
+    return g == Gravity::Smart || g == Gravity::Entropy || g == Gravity::Center;
+}
+
+static VipsInteresting map_fast_gravity(Gravity g) {
     switch (g) {
-    case Gravity::Entropy:   return VIPS_INTERESTING_ENTROPY;
-    case Gravity::Center:    return VIPS_INTERESTING_CENTRE;
-    default:                 return VIPS_INTERESTING_ATTENTION;
+    case Gravity::Entropy: return VIPS_INTERESTING_ENTROPY;
+    case Gravity::Center:  return VIPS_INTERESTING_CENTRE;
+    case Gravity::Smart:   return VIPS_INTERESTING_ATTENTION;
+    default:               return VIPS_INTERESTING_CENTRE;  // unreachable
+    }
+}
+
+// For directional/corner/focus-point crop: return the top-left offset of a
+// target_w × target_h window inside a scaled_w × scaled_h canvas. Offsets are
+// clamped so the window always stays inside the canvas.
+static void gravity_offset(Gravity g, double fp_x, double fp_y,
+                           int scaled_w, int scaled_h,
+                           int target_w, int target_h,
+                           int& left, int& top)
+{
+    const int dx = std::max(0, scaled_w - target_w);
+    const int dy = std::max(0, scaled_h - target_h);
+
+    auto mid_x = dx / 2;
+    auto mid_y = dy / 2;
+
+    switch (g) {
+    case Gravity::North:     left = mid_x; top = 0;     break;
+    case Gravity::South:     left = mid_x; top = dy;    break;
+    case Gravity::East:      left = dx;    top = mid_y; break;
+    case Gravity::West:      left = 0;     top = mid_y; break;
+    case Gravity::NorthEast: left = dx;    top = 0;     break;
+    case Gravity::NorthWest: left = 0;     top = 0;     break;
+    case Gravity::SouthEast: left = dx;    top = dy;    break;
+    case Gravity::SouthWest: left = 0;     top = dy;    break;
+    case Gravity::FocusPoint: {
+        // Focus point centered in target window, clamped to canvas.
+        double cx = fp_x * scaled_w;
+        double cy = fp_y * scaled_h;
+        long   l  = static_cast<long>(cx) - target_w / 2;
+        long   t  = static_cast<long>(cy) - target_h / 2;
+        if (l < 0) l = 0; else if (l > dx) l = dx;
+        if (t < 0) t = 0; else if (t > dy) t = dy;
+        left = static_cast<int>(l);
+        top  = static_cast<int>(t);
+        break;
+    }
+    default: left = mid_x; top = mid_y;  // Center fallback
     }
 }
 
@@ -257,25 +305,79 @@ std::string ImageProcessor::resize_sync(
 }
 
 std::string ImageProcessor::crop_sync(
-    const std::vector<uint8_t>& buf, int w, int h, Gravity gravity, OutputFormat fmt, int quality,
+    const std::vector<uint8_t>& buf, int w, int h, Gravity gravity,
+    double fp_x, double fp_y, OutputFormat fmt, int quality,
     int max_src_resolution_mp)
 {
     VipsImageGuard src = load_with_shrink_for_target(
         buf, max_src_resolution_mp, w, h);
 
-    VipsImage* raw_out = nullptr;
-    int r = vips_thumbnail_image(src.get(), &raw_out, w,
-        "height", h,
-        "size",   VIPS_SIZE_BOTH,
-        "crop",   map_gravity(gravity),
-        NULL);
+    // Fast path: content-aware (Smart/Entropy) and plain Center can be served
+    // by vips_thumbnail_image's built-in crop modes — one op, best case.
+    if (is_fast_path_gravity(gravity)) {
+        VipsImage* raw_out = nullptr;
+        int r = vips_thumbnail_image(src.get(), &raw_out, w,
+            "height", h,
+            "size",   VIPS_SIZE_BOTH,
+            "crop",   map_fast_gravity(gravity),
+            NULL);
 
+        if (r != 0 || !raw_out) {
+            std::string msg = vips_error_buffer();
+            vips_error_clear();
+            throw std::runtime_error("vips crop failed: " + msg);
+        }
+        VipsImageGuard out{raw_out};
+        return save_image(out.get(), fmt, quality);
+    }
+
+    // Slow path: cover-scale + extract_area for directional / corner / focus
+    // point gravities. libvips' VipsInteresting has no per-axis option, so
+    // build the window manually.
+    //
+    //   cover = max(target_w / src_w, target_h / src_h)
+    //   resize(src, cover) → canvas that just covers the target
+    //   extract_area(canvas, gravity-derived offset, target_w, target_h)
+    //
+    // Shrink-on-load has already brought the source close to the target size,
+    // so `cover` here is typically in [0.5, 2.0].
+    const int src_w = vips_image_get_width(src.get());
+    const int src_h = vips_image_get_height(src.get());
+    if (src_w <= 0 || src_h <= 0)
+        throw std::runtime_error("vips crop: invalid source dimensions");
+
+    const double sx    = static_cast<double>(w) / src_w;
+    const double sy    = static_cast<double>(h) / src_h;
+    const double scale = std::max(sx, sy);
+
+    VipsImage* raw_scaled = nullptr;
+    int r = vips_resize(src.get(), &raw_scaled, scale, NULL);
+    if (r != 0 || !raw_scaled) {
+        std::string msg = vips_error_buffer();
+        vips_error_clear();
+        throw std::runtime_error("vips resize (cover) failed: " + msg);
+    }
+    VipsImageGuard scaled{raw_scaled};
+
+    const int scaled_w = vips_image_get_width(scaled.get());
+    const int scaled_h = vips_image_get_height(scaled.get());
+
+    // Window can't exceed the scaled canvas even under float rounding.
+    const int win_w = std::min(w, scaled_w);
+    const int win_h = std::min(h, scaled_h);
+
+    int left = 0, top = 0;
+    gravity_offset(gravity, fp_x, fp_y,
+                   scaled_w, scaled_h, win_w, win_h,
+                   left, top);
+
+    VipsImage* raw_out = nullptr;
+    r = vips_extract_area(scaled.get(), &raw_out, left, top, win_w, win_h, NULL);
     if (r != 0 || !raw_out) {
         std::string msg = vips_error_buffer();
         vips_error_clear();
-        throw std::runtime_error("vips crop failed: " + msg);
+        throw std::runtime_error("vips extract_area failed: " + msg);
     }
-
     VipsImageGuard out{raw_out};
     return save_image(out.get(), fmt, quality);
 }
@@ -405,12 +507,13 @@ drogon::Task<std::string> ImageProcessor::resize(
 }
 
 drogon::Task<std::string> ImageProcessor::crop(
-    std::vector<uint8_t> buf, int w, int h, Gravity gravity, OutputFormat fmt, int quality)
+    std::vector<uint8_t> buf, int w, int h, Gravity gravity,
+    double fp_x, double fp_y, OutputFormat fmt, int quality)
 {
     const int max_mp = max_src_resolution_mp_;
     co_return co_await submit(std::move(buf),
-        [w, h, gravity, fmt, quality, max_mp](const std::vector<uint8_t>& b) {
-            return crop_sync(b, w, h, gravity, fmt, quality, max_mp);
+        [w, h, gravity, fp_x, fp_y, fmt, quality, max_mp](const std::vector<uint8_t>& b) {
+            return crop_sync(b, w, h, gravity, fp_x, fp_y, fmt, quality, max_mp);
         });
 }
 

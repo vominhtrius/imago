@@ -1,0 +1,13 @@
+/* Hide the goto-dialog (summoned by `g`). */
+.slidev-goto-dialog,
+[class*="goto-dialog"] {
+  display: none !important;
+}
+
+/* Hide the presenter-view slide-list sidebar.
+   Only affects /presenter/* — the audience view never had it. */
+.slidev-presenter aside,
+.slidev-presenter .slides-overview,
+.slidev-presenter [class*="slides-list"] {
+  display: none !important;
+}
