@@ -183,9 +183,11 @@ drogon::Task<void> S3ClientWrapper::upload(
     auto* loop = trantor::EventLoop::getEventLoopOfCurrentThread();
 
     struct PutState {
-        std::vector<uint8_t> data;   // pinned until the async call completes
-        std::string          error_message;
-        int                  error_http_code = 500;
+        std::vector<uint8_t>                                        data;   // pinned until the async call completes
+        std::shared_ptr<Aws::Utils::Stream::PreallocatedStreamBuf>  streambuf;
+        std::shared_ptr<Aws::IOStream>                              body;
+        std::string                                                 error_message;
+        int                                                         error_http_code = 500;
     };
     struct CancelGuard {
         std::mutex m;
@@ -218,14 +220,19 @@ drogon::Task<void> S3ClientWrapper::upload(
             if (!content_type.empty()) req.SetContentType(content_type);
 
             // PreallocatedStreamBuf wraps our vector bytes without copy.
-            // The SDK drains the stream before the callback fires, so pinning
-            // `state->data` through the callback keeps the buffer alive.
-            auto streambuf = Aws::MakeShared<Aws::Utils::Stream::PreallocatedStreamBuf>(
+            // The IOStream holds only a raw pointer to the streambuf, so we
+            // pin both in PutState — otherwise the streambuf dies when this
+            // function returns and the SDK signs/reads a dangling buffer
+            // ("SDK failed to sign the request"). PutObjectRequest also takes
+            // a shared_ptr to the body, so the request itself keeps the
+            // IOStream alive across the SDK's internal queueing.
+            state->streambuf = Aws::MakeShared<Aws::Utils::Stream::PreallocatedStreamBuf>(
                 "imago-upload",
                 state->data.data(),
                 state->data.size());
-            auto body = Aws::MakeShared<Aws::IOStream>("imago-upload", streambuf.get());
-            req.SetBody(body);
+            state->body = Aws::MakeShared<Aws::IOStream>("imago-upload",
+                                                          state->streambuf.get());
+            req.SetBody(state->body);
 
             client->PutObjectAsync(req,
                 [state = state, guard = guard, loop = loop, h](

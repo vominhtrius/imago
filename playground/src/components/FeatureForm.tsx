@@ -281,12 +281,12 @@ export function FeatureForm({ operation, title, description, showResize, showCro
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
-      <Card>
+      <Card className="min-w-0 overflow-hidden">
         <CardHeader>
           <CardTitle>{title}</CardTitle>
           <p className="text-sm text-(--color-muted-foreground)">{description}</p>
         </CardHeader>
-        <CardContent className="grid gap-4">
+        <CardContent className="grid min-w-0 gap-4">
           <SourcePicker value={source} onChange={setSource} />
 
           <InputPreview source={source} />

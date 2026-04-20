@@ -1,5 +1,6 @@
 #include "infrastructure/vips/ImageProcessor.hpp"
 #include "models/HttpException.hpp"
+#include "utils/HttpUtils.hpp"
 #include <trantor/net/EventLoop.h>
 #include <algorithm>
 #include <cstdio>
@@ -562,10 +563,12 @@ ImageProcessor::IngestResult ImageProcessor::ingest_sync(
         }
     }
 
-    // 3. Load. Sequential access keeps peak pixel memory bounded to a few
-    //    rows at a time — the decoder streams into our re-encode pipeline.
+    // 3. Load with random access — ingest applies vips_autorot (90°/180°/270°
+    //    transpose) and optional resize, both of which need non-sequential
+    //    pixel access. A sequential loader would fail later at save time with
+    //    "VipsJpeg: out of order read". Memory is bounded by UPLOAD_MAX_BYTES.
     VipsImage* raw = vips_image_new_from_buffer(
-        buf.data(), buf.size(), "[access=sequential]", NULL);
+        buf.data(), buf.size(), "", NULL);
     if (!raw) {
         std::string msg = vips_error_buffer(); vips_error_clear();
         throw std::runtime_error("vips load failed: " + msg);
