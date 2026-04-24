@@ -23,9 +23,13 @@ public:
     // retained until the async callback fires; the coroutine resumes on the
     // Drogon event loop thread that originated the call. Throws
     // HttpException with an AWS-derived status code on failure.
+    //
+    // `data` is std::string (not std::vector<uint8_t>) because the libvips
+    // encoder sink returns std::string directly — threading it through as
+    // string avoids a full-payload copy on the upload path.
     drogon::Task<void> upload(
         const std::string& bucket, const std::string& key,
-        std::vector<uint8_t> data, const std::string& content_type);
+        std::string data, const std::string& content_type);
 
     // Drops the AWS S3 client (and the PooledThreadExecutor it owns,
     // whose destructor joins worker threads). Must run before

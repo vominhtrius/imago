@@ -7,8 +7,9 @@
 #include <json/json.h>
 #include <string>
 
-UploadUseCase::UploadUseCase(S3ClientWrapper* s3, ImageProcessor* processor)
-    : s3_(s3), processor_(processor) {}
+UploadUseCase::UploadUseCase(S3ClientWrapper* s3, ImageProcessor* processor,
+                             UploadDefaults defaults)
+    : s3_(s3), processor_(processor), defaults_(std::move(defaults)) {}
 
 namespace {
 
@@ -26,13 +27,29 @@ std::string extension_for(OutputFormat fmt) {
     return ".bin";
 }
 
-// Normalize a client-supplied prefix: strip a leading slash so the key is
-// always bucket-relative, and ensure a trailing slash so the random suffix
-// doesn't fuse into a preceding directory name.
+// Normalize a client-supplied prefix:
+//   * strip leading slashes so the key is always bucket-relative
+//   * drop '.', '..', and empty path components — S3 keys are flat, but the
+//     key is echoed in the Location header and in `s3://` URLs. A '..'
+//     component survives there literally and browsers applying relative-URL
+//     resolution would escape the intended folder.
+//   * ensure exactly one trailing slash so the random suffix doesn't fuse
+//     into a preceding directory name.
 std::string normalize_prefix(std::string p) {
-    while (!p.empty() && p.front() == '/') p.erase(p.begin());
-    if (!p.empty() && p.back() != '/') p.push_back('/');
-    return p;
+    std::string out;
+    std::size_t start = 0;
+    while (start < p.size()) {
+        std::size_t end = p.find('/', start);
+        if (end == std::string::npos) end = p.size();
+        std::string_view seg(p.data() + start, end - start);
+        if (!seg.empty() && seg != "." && seg != "..") {
+            if (!out.empty()) out.push_back('/');
+            out.append(seg);
+        }
+        start = end + 1;
+    }
+    if (!out.empty()) out.push_back('/');
+    return out;
 }
 
 }  // namespace
@@ -65,9 +82,12 @@ drogon::Task<drogon::HttpResponsePtr> UploadUseCase::execute(UploadRequest req) 
                               + extension_for(res.output);
     const std::string ct     = content_type_for(res.output);
 
-    std::vector<uint8_t> body(res.bytes.begin(), res.bytes.end());
-    const std::size_t stored_bytes = body.size();
-    co_await s3_->upload(req.bucket, key, std::move(body), ct);
+    // Move the encoded bytes straight into the uploader — save_image returns
+    // std::string, S3ClientWrapper::upload accepts std::string, so there is
+    // no intermediate copy of the payload (was a full 25 MiB memcpy per
+    // request at the cap).
+    const std::size_t stored_bytes = res.bytes.size();
+    co_await s3_->upload(req.bucket, key, std::move(res.bytes), ct);
 
     Json::Value j;
     j["bucket"]       = req.bucket;

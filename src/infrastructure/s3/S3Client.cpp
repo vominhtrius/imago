@@ -178,12 +178,12 @@ drogon::Task<std::vector<uint8_t>> S3ClientWrapper::download(
 
 drogon::Task<void> S3ClientWrapper::upload(
     const std::string& bucket, const std::string& key,
-    std::vector<uint8_t> data, const std::string& content_type)
+    std::string data, const std::string& content_type)
 {
     auto* loop = trantor::EventLoop::getEventLoopOfCurrentThread();
 
     struct PutState {
-        std::vector<uint8_t>                                        data;   // pinned until the async call completes
+        std::string                                                 data;   // pinned until the async call completes
         std::shared_ptr<Aws::Utils::Stream::PreallocatedStreamBuf>  streambuf;
         std::shared_ptr<Aws::IOStream>                              body;
         std::string                                                 error_message;
@@ -228,7 +228,7 @@ drogon::Task<void> S3ClientWrapper::upload(
             // IOStream alive across the SDK's internal queueing.
             state->streambuf = Aws::MakeShared<Aws::Utils::Stream::PreallocatedStreamBuf>(
                 "imago-upload",
-                state->data.data(),
+                reinterpret_cast<unsigned char*>(state->data.data()),
                 state->data.size());
             state->body = Aws::MakeShared<Aws::IOStream>("imago-upload",
                                                           state->streambuf.get());

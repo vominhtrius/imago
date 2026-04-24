@@ -1,6 +1,5 @@
 #include "controllers/UploadController.hpp"
 #include "plugins/UsecasePlugin.hpp"
-#include "config/AppConfig.hpp"
 #include "models/HttpException.hpp"
 #include "utils/HttpUtils.hpp"
 #include <drogon/MultiPart.h>
@@ -61,7 +60,12 @@ drogon::Task<drogon::HttpResponsePtr> UploadController::handle(
 {
     if (req->getMethod() == drogon::Options) co_return preflight();
 
-    const auto cfg = AppConfig::from_env();
+    // Read upload defaults once from the plugin — previously this called
+    // AppConfig::from_env() on every inbound request, which touched every
+    // UPLOAD_* env var per request and risked hot-reload inconsistency with
+    // S3Plugin/VipsPlugin (which read env only at init).
+    auto* usecases = drogon::app().getPlugin<UsecasePlugin>();
+    const auto& defaults = usecases->upload().defaults();
 
     // Bucket: query param override is allowed (useful for multi-tenant
     // deployments where the uploader handles several backing buckets).
@@ -69,20 +73,20 @@ drogon::Task<drogon::HttpResponsePtr> UploadController::handle(
     // bucket claim — for now we accept the query param or fall through
     // to the configured default.
     std::string bucket = req->getParameter("bucket");
-    if (bucket.empty()) bucket = cfg.upload_bucket;
+    if (bucket.empty()) bucket = defaults.bucket;
     if (bucket.empty())
         co_return bad_request("upload bucket not configured "
                               "(set UPLOAD_BUCKET or ?bucket=)");
 
     std::string prefix = req->getParameter("prefix");
-    if (prefix.empty()) prefix = cfg.upload_key_prefix;
+    if (prefix.empty()) prefix = defaults.key_prefix;
 
     UploadRequest ureq;
     ureq.bucket             = std::move(bucket);
     ureq.key_prefix         = std::move(prefix);
-    ureq.max_bytes          = cfg.upload_max_bytes;
-    ureq.pre_resize_max_dim = cfg.upload_pre_resize_max_dim;
-    ureq.normalize_heic     = cfg.upload_normalize_heic;
+    ureq.max_bytes          = defaults.max_bytes;
+    ureq.pre_resize_max_dim = defaults.pre_resize_max_dim;
+    ureq.normalize_heic     = defaults.normalize_heic;
 
     if (auto v = req->getParameter("pre_resize"); !v.empty()) {
         int n = 0;
@@ -114,10 +118,7 @@ drogon::Task<drogon::HttpResponsePtr> UploadController::handle(
     }
 
     try {
-        co_return co_await drogon::app()
-            .getPlugin<UsecasePlugin>()
-            ->upload()
-            .execute(std::move(ureq));
+        co_return co_await usecases->upload().execute(std::move(ureq));
     } catch (const HttpException& e) {
         co_return error_response(e.status_code, e.message);
     } catch (const std::exception& e) {
