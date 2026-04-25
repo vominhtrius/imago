@@ -1,5 +1,6 @@
 #include "infrastructure/vips/ImageProcessor.hpp"
 #include "models/HttpException.hpp"
+#include "utils/HttpUtils.hpp"
 #include <trantor/net/EventLoop.h>
 #include <algorithm>
 #include <cstdio>
@@ -519,6 +520,106 @@ std::string ImageProcessor::convert_sync(
     return save_image(img.get(), fmt, quality);
 }
 
+// --- ingest (upload path) ---------------------------------------------------
+// Validates, normalizes, optionally pre-resizes, strips metadata, and re-
+// encodes the uploaded bytes so downstream never sees the original's EXIF /
+// IPTC / XMP. Magic-byte validation relies on libvips' loader lookup —
+// vips_foreign_find_load_buffer returns NULL for anything it can't open,
+// which gives us format sniffing and forgery rejection in one call.
+ImageProcessor::IngestResult ImageProcessor::ingest_sync(
+    const std::vector<uint8_t>& buf, IngestOptions opts,
+    int max_src_resolution_mp)
+{
+    if (buf.empty())
+        throw HttpException(drogon::k400BadRequest, "empty upload body");
+
+    // 1. Magic-byte validation. Rejects anything libvips can't decode —
+    //    covers text/SVG/PDF/zip-bomb disguises sent with a fake image/*
+    //    Content-Type.
+    const char* loader = vips_foreign_find_load_buffer(buf.data(), buf.size());
+    if (!loader) {
+        vips_error_clear();
+        throw HttpException(drogon::k415UnsupportedMediaType,
+            "unsupported or unrecognized image format");
+    }
+
+    // 2. Detect the source format *before* loading, so we can apply the
+    //    HEIC → JPEG normalization rule even on the fast path where we
+    //    don't resize. sniff_source_format reads only the header bytes.
+    const OutputFormat src_fmt = sniff_source_format(buf);
+
+    // Resolve the target format:
+    //   override_output wins; otherwise HEIC/AVIF from a camera roll is
+    //   normalized to JPEG unless opts.normalize_heic is false; everything
+    //   else is preserved in its source format.
+    OutputFormat out_fmt = opts.override_output;
+    if (out_fmt == OutputFormat::Auto) {
+        if (opts.normalize_heic && src_fmt == OutputFormat::AVIF) {
+            // sniff_source_format maps both HEIC and AVIF to AVIF; the
+            // normalize rule treats "ISO-BMFF container" as the signal.
+            out_fmt = OutputFormat::JPEG;
+        } else {
+            out_fmt = src_fmt;
+        }
+    }
+
+    // 3. Load with random access — ingest applies vips_autorot (90°/180°/270°
+    //    transpose) and optional resize, both of which need non-sequential
+    //    pixel access. A sequential loader would fail later at save time with
+    //    "VipsJpeg: out of order read". Memory is bounded by UPLOAD_MAX_BYTES.
+    VipsImage* raw = vips_image_new_from_buffer(
+        buf.data(), buf.size(), "", NULL);
+    if (!raw) {
+        std::string msg = vips_error_buffer(); vips_error_clear();
+        throw std::runtime_error("vips load failed: " + msg);
+    }
+    VipsImageGuard img{raw};
+
+    // 4. Resolution cap — same check as the serve path.
+    check_src_resolution(img.get(), max_src_resolution_mp);
+
+    // 5. Apply EXIF orientation on ingest so stored pixels are already in
+    //    visual order. Downstream readers (and the serve path) can then
+    //    ignore orientation entirely; vips_autorot also drops the tag.
+    {
+        VipsImage* rot = nullptr;
+        if (vips_autorot(img.get(), &rot, NULL) != 0 || !rot) {
+            std::string msg = vips_error_buffer(); vips_error_clear();
+            throw std::runtime_error("vips autorot failed: " + msg);
+        }
+        img = VipsImageGuard{rot};
+    }
+
+    // 6. Optional pre-resize: cap the long edge to pre_resize_max_dim.
+    //    Shrinks oversized uploads at ingest so we don't pay the decode
+    //    cost twice per request on the serve path. Skipped when the source
+    //    is already within the cap (no-enlarge passthrough).
+    if (opts.pre_resize_max_dim > 0) {
+        const int w = vips_image_get_width(img.get());
+        const int h = vips_image_get_height(img.get());
+        const int long_edge = std::max(w, h);
+        if (long_edge > opts.pre_resize_max_dim) {
+            const double scale =
+                static_cast<double>(opts.pre_resize_max_dim) / long_edge;
+            VipsImage* scaled = nullptr;
+            if (vips_resize(img.get(), &scaled, scale, NULL) != 0 || !scaled) {
+                std::string msg = vips_error_buffer(); vips_error_clear();
+                throw std::runtime_error("vips pre-resize failed: " + msg);
+            }
+            img = VipsImageGuard{scaled};
+        }
+    }
+
+    IngestResult res;
+    res.output = out_fmt;
+    res.width  = vips_image_get_width(img.get());
+    res.height = vips_image_get_height(img.get());
+    // save_image runs strip_sensitive_metadata before encoding, so the
+    // output bytes are already scrubbed of EXIF-GPS / XMP / IPTC.
+    res.bytes  = save_image(img.get(), out_fmt, opts.quality);
+    return res;
+}
+
 // --- thread pool ------------------------------------------------------------
 
 ImageProcessor::ImageProcessor(int workers, int max_src_resolution_mp, int max_queue_size)
@@ -683,4 +784,24 @@ drogon::Task<std::string> ImageProcessor::convert(
         [fmt, quality, max_mp](const std::vector<uint8_t>& b) {
             return convert_sync(b, fmt, quality, max_mp);
         });
+}
+
+drogon::Task<ImageProcessor::IngestResult> ImageProcessor::ingest(
+    std::vector<uint8_t> buf, IngestOptions opts)
+{
+    // submit() returns std::string; we smuggle the metadata out by writing
+    // it to a shared result holder from inside the worker lambda, keeping
+    // the submit API simple and avoiding a template instantiation on T.
+    const int max_mp = max_src_resolution_mp_;
+    auto meta = std::make_shared<IngestResult>();
+    auto bytes = co_await submit(std::move(buf),
+        [opts, meta, max_mp](const std::vector<uint8_t>& b) {
+            auto r = ingest_sync(b, opts, max_mp);
+            meta->output = r.output;
+            meta->width  = r.width;
+            meta->height = r.height;
+            return std::move(r.bytes);
+        });
+    meta->bytes = std::move(bytes);
+    co_return std::move(*meta);
 }

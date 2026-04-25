@@ -195,3 +195,62 @@ export async function fetchImage(url: string, opts: FetchOptions): Promise<Fetch
 export function fetchImago(url: string): Promise<FetchResult> {
   return fetchImage(url, { label: 'imago' })
 }
+
+export interface UploadResponse {
+  bucket: string
+  key: string
+  url: string
+  content_type: string
+  bytes: number
+  width: number
+  height: number
+}
+
+export interface UploadImagoOptions {
+  /** Override the server-configured bucket (maps to ?bucket=). */
+  bucket?: string
+  /** Override the server-configured key prefix (maps to ?prefix=). */
+  prefix?: string
+  /** Cap the longest edge in pixels before re-encoding. 0 disables. */
+  preResize?: number
+  /** Re-encode HEIC/HEIF to JPEG for broader compatibility. */
+  normalizeHeic?: boolean
+  /** Force output format (webp | jpeg | png | avif). */
+  output?: string
+  /** Quality 1-100. */
+  quality?: number
+}
+
+// POST a File to the imago upload endpoint. The server sniffs magic bytes,
+// strips EXIF/IPTC/XMP, optionally pre-resizes, and re-encodes — the returned
+// {bucket, key} pair addresses the stored object and can be fed to
+// /resize, /crop, /convert exactly like a manually-keyed S3 object.
+export async function uploadToImago(
+  settings: AppSettings,
+  file: File,
+  opts: UploadImagoOptions = {},
+): Promise<UploadResponse> {
+  const base = settings.imagoBaseUrl.replace(/\/+$/, '')
+  const url = new URL(`${base}/v1/upload`, window.location.origin)
+  if (opts.bucket) url.searchParams.set('bucket', opts.bucket)
+  if (opts.prefix) url.searchParams.set('prefix', opts.prefix)
+  if (opts.preResize !== undefined) {
+    url.searchParams.set('pre_resize', String(opts.preResize))
+  }
+  if (opts.normalizeHeic !== undefined) {
+    url.searchParams.set('normalize_heic', opts.normalizeHeic ? 'true' : 'false')
+  }
+  if (opts.output) url.searchParams.set('output', opts.output)
+  if (opts.quality !== undefined) url.searchParams.set('quality', String(opts.quality))
+
+  const form = new FormData()
+  form.append('file', file, file.name)
+
+  const target = resolveFinal(settings.imagoBaseUrl, url)
+  const res = await fetch(target, { method: 'POST', body: form })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`imago upload ${res.status}: ${text || res.statusText}`)
+  }
+  return (await res.json()) as UploadResponse
+}

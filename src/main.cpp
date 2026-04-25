@@ -53,11 +53,22 @@ int main() {
     // (and browser devtools) can see the server-side processing time.
     // Same-origin in our setup, but we also expose the header via CORS so
     // direct cross-origin fetches can read it.
+    // Drogon's default client_max_body_size is 1 MiB — too small for the
+    // upload endpoint. Size the ceiling a few KiB above UPLOAD_MAX_BYTES so
+    // multipart framing overhead doesn't trip the guard before the
+    // controller can return a friendly 413 with the configured limit.
+    const std::size_t client_body_cap =
+        cfg.upload_max_bytes > 0
+            ? static_cast<std::size_t>(cfg.upload_max_bytes) + (64 * 1024)
+            : static_cast<std::size_t>(32) * 1024 * 1024;
+
     drogon::app()
         .loadConfigJson(drogon_cfg)
         .setThreadNum(cfg.drogon_workers)
         .addListener("0.0.0.0", cfg.port)
         .setMaxConnectionNum(2048)
+        .setClientMaxBodySize(client_body_cap)
+        .setClientMaxMemoryBodySize(client_body_cap)
         .registerPreRoutingAdvice([](const drogon::HttpRequestPtr& req) {
             req->attributes()->insert(
                 "imago_start", std::chrono::steady_clock::now());

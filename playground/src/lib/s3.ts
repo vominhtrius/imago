@@ -1,4 +1,9 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import {
+  GetObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3'
 import type { AppSettings } from './settings'
 
 export function makeS3Client(s: AppSettings): S3Client {
@@ -58,6 +63,52 @@ export async function downloadFromS3(
   // ArrayBuffer). The copy is a one-shot memcpy — negligible vs network.
   const buf = bytes.slice().buffer as ArrayBuffer
   return new Blob([buf], { type: out.ContentType || 'application/octet-stream' })
+}
+
+export interface S3Object {
+  key: string
+  size: number
+  lastModified: Date | null
+}
+
+export interface ListS3Result {
+  objects: S3Object[]
+  prefixes: string[]
+  nextToken: string | null
+}
+
+// ListObjectsV2 — scoped to `prefix` with `/` delimiter so we can render a
+// file-browser-style view (common prefixes as folders, keys as files).
+// Call repeatedly with `continuationToken` to paginate.
+export async function listS3Objects(
+  s: AppSettings,
+  bucket: string,
+  prefix: string,
+  continuationToken?: string,
+): Promise<ListS3Result> {
+  const client = makeS3Client(s)
+  const out = await client.send(
+    new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: prefix || undefined,
+      Delimiter: '/',
+      MaxKeys: 200,
+      ContinuationToken: continuationToken,
+    }),
+  )
+  const objects: S3Object[] =
+    out.Contents?.filter((c) => c.Key !== undefined && c.Key !== prefix).map((c) => ({
+      key: c.Key!,
+      size: c.Size ?? 0,
+      lastModified: c.LastModified ?? null,
+    })) ?? []
+  const prefixes: string[] =
+    out.CommonPrefixes?.filter((p) => p.Prefix !== undefined).map((p) => p.Prefix!) ?? []
+  return {
+    objects,
+    prefixes,
+    nextToken: out.IsTruncated ? (out.NextContinuationToken ?? null) : null,
+  }
 }
 
 function cryptoRandomId() {
